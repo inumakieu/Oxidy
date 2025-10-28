@@ -2,12 +2,14 @@ use std::{fs::{self, read_to_string}, io::{self, stdout, Read, Stdout, Write}, p
 use crossterm::{
     cursor::{self, SetCursorStyle},
     event::{poll, read, Event, KeyCode, KeyEvent, KeyModifiers},
-    style::{self, style, PrintStyledContent, ResetColor, SetBackgroundColor, SetForegroundColor, Stylize}, 
+    style::{self, style, Color, PrintStyledContent, ResetColor, SetBackgroundColor, SetForegroundColor, Stylize}, 
     terminal, ExecutableCommand, QueueableCommand
 };
 use rhai::{Dynamic, Engine, Map, Scope};
 use std::fs::File;
 use std::env;
+use std::collections::HashMap;
+use regex::Regex;
 
 pub struct Size {
     pub cols: u16,
@@ -35,6 +37,82 @@ pub struct Location {
     pub row: u16
 }
 
+pub struct Highlighter {
+    pub rules: Vec<(Regex, Color)>
+}
+
+pub struct Token {
+    pub text: String,
+    pub offset: usize,
+    pub style: Option<Color>
+}
+
+impl Highlighter {
+    pub fn new() -> Self {
+        let mut rules: Vec<(Regex, Color)> = Vec::new();
+        
+        rules.push((Regex::new(r"\blet \b").unwrap(), Color::Red));
+        rules.push((Regex::new(r"\bpub \b").unwrap(), Color::Red));
+        rules.push((Regex::new(r"\bimpl \b").unwrap(), Color::Red));
+        rules.push((Regex::new(r"\bfn \b").unwrap(), Color::Red));
+        rules.push((Regex::new(r"\buse \b").unwrap(), Color::Red));
+
+        Self { rules }
+    }
+
+    pub fn highlight(&self, line: &str) -> Vec<Token> {
+        let mut tokens: Vec<Token> = Vec::new();
+
+        if line.is_empty() {
+            return tokens;
+        }
+
+        for (regex, color ) in &self.rules {
+            regex
+                .find_iter(line)
+                .for_each(|mat| {
+                    tokens.push(Token { text: mat.as_str().to_string(), offset: mat.start(), style: Some(color.clone()) })
+                });
+        }
+
+        let mut found: String = "".to_string();
+        let mut found_tokens: Vec<Token> = Vec::new();
+        
+        // 0 - 3 -> "    "
+        // 4 - 6 -> "pub"
+        // 7 - 21 -> " struct Token {"
+        let mut index = 0;
+        while index <= line.len() - 1 {
+            if let Some(token) = tokens.iter().find(|token| token.offset == index) {
+                if !found.is_empty() {
+                    found_tokens.push(
+                        Token { text: found.clone(), offset: index - found.len(), style: Some(Color::Blue) }
+                    );
+                    found = "".to_string();
+                }
+                index += token.text.len();
+                continue;
+            }
+            found.push(line.chars().nth(index).unwrap());
+
+            if index == line.len() - 1 {
+                found_tokens.push(
+                    Token { text: found.clone(), offset: index - (found.len() - 1), style: Some(Color::Blue) }
+                );
+                found = "".to_string();
+            }
+
+            index += 1;
+        } 
+        
+        tokens.extend(found_tokens);
+
+        tokens.sort_by_key(|t| t.offset);
+
+        tokens
+    }
+}
+
 pub struct Editor {
     pub mode: EditorMode,
     pub output: Stdout,
@@ -43,7 +121,8 @@ pub struct Editor {
     pub text: Vec<String>,
     pub location: Location,
     pub current_path: String,
-    pub scroll_offset: u16
+    pub scroll_offset: u16,
+    pub highlighter: Highlighter
 }
 
 impl Editor {
@@ -64,7 +143,8 @@ impl Editor {
             text: Vec::new(),
             location: Location { col: 6, row: 0 },
             current_path: "".to_string(),
-            scroll_offset: 0
+            scroll_offset: 0,
+            highlighter: Highlighter::new()
         }
     }
 
@@ -298,16 +378,22 @@ impl Editor {
                 let signed_scroll_offset = self.scroll_offset as i16;
                 let relative_distance = (current_line - (signed_row + signed_scroll_offset)).abs();
                 if current_line == signed_row + signed_scroll_offset { 
-                    print!("{:5} {}", current_line, line);
+                    print!("{:5} ", current_line);
                 } else {
                     self.output
                         .queue(
                             style::PrintStyledContent(
-                                format!("{:5}", relative_distance).dark_grey()
+                                format!("{:5} ", relative_distance).dark_grey()
                             )
                         )?;
-                    print!(" {}", line);
                 }
+
+                // TODO: Add regex highlighting
+                let styled_line = self.highlighter.highlight(line);
+                for token in styled_line {
+                    self.output.queue(style::PrintStyledContent(token.text.with(token.style.unwrap_or(Color::White))))?;
+                }
+                // print!("{}", line);
             } else {
                 self.output.queue(style::PrintStyledContent("    ∼ ".grey()))?; 
             }
