@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::fs::{File, write};
 
-use crossterm::cursor::{SetCursorStyle, MoveTo};
+use crossterm::cursor::{self, MoveTo, SetCursorStyle};
 use crossterm::event::{poll, read, Event, KeyCode, KeyEvent};
 use crossterm::style::{self, Color, ContentStyle, PrintStyledContent, ResetColor, SetBackgroundColor, SetForegroundColor, SetStyle, StyledContent, Stylize}; 
 use crossterm::{terminal, ExecutableCommand, QueueableCommand};
@@ -96,6 +96,7 @@ impl Editor {
             };
             self.render_buffer.current = vec![empty_line; self.size.rows as usize];
             self.output.queue(terminal::BeginSynchronizedUpdate)?;
+            self.output.queue(cursor::Hide)?;
             let mut output = self.output.lock();
             queue!(output, MoveTo(0, 0))?;
             // self.output.queue(terminal::Clear(terminal::ClearType::All))?;
@@ -191,6 +192,7 @@ impl Editor {
                 }
             }
             
+            self.output.queue(cursor::Show)?;
             self.output.queue(terminal::EndSynchronizedUpdate)?;
             self.output.flush()?;
         }
@@ -487,12 +489,16 @@ impl Editor {
         
         Ok(())
     }
+
+    pub fn cleanup(&mut self) {
+        terminal::disable_raw_mode().expect("Could not disable raw mode.");
+        self.output.execute(terminal::LeaveAlternateScreen).expect("Could not leave alternate screen.");
+    }
 }
 
 
 impl Drop for Editor {
     fn drop(&mut self) {
-        terminal::disable_raw_mode().expect("Could not disable raw mode.");
-        self.output.execute(terminal::LeaveAlternateScreen).expect("Could not leave alternate screen.");
+        self.cleanup();
     }
 }
