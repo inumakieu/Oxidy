@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::fs::{File, write};
 
-use crossterm::cursor::{self, MoveTo, SetCursorStyle};
+use crossterm::cursor::{self, MoveTo, SetCursorStyle, Show};
 use crossterm::event::{poll, read, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, MouseEvent, MouseEventKind};
 use crossterm::style::{self, Color, ContentStyle, PrintStyledContent, ResetColor, SetBackgroundColor, SetForegroundColor, SetStyle, StyledContent, Stylize}; 
 use crossterm::{terminal, ExecutableCommand, QueueableCommand};
@@ -547,6 +547,7 @@ impl Editor {
     pub fn cleanup(&mut self) {
         terminal::disable_raw_mode().expect("Could not disable raw mode.");
         self.output.execute(terminal::LeaveAlternateScreen).expect("Could not leave alternate screen.");
+        self.output.execute(Show).expect("Could not show cursor.");
         self.output.execute(DisableMouseCapture).expect("Could not disable mouse capture.");
     }
 }
