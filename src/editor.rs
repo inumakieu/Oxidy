@@ -390,7 +390,11 @@ impl Editor {
                 }
 
                 if self.mode == EditorMode::INSERT {
-                    self.text.insert(self.location.row as usize + 1, "".to_string());
+                    if self.location.row as usize + 1 >= self.text.len() {
+                        self.text.push("".to_string());
+                    } else {
+                        self.text.insert(self.location.row as usize + 1, "".to_string());
+                    }
                     self.location.row += 1;
                     self.location.col = 6;
                 }
