@@ -138,31 +138,28 @@ impl Editor {
                     Event::Mouse(mouse_event) => {
                         if self.text.is_empty() { continue; };
 
+                        let scroll_up_kind = {
+                            let kind: MouseEventKind;
+                            if self.plugin_manager.config.opt.natural_scroll { kind = MouseEventKind::ScrollDown; }
+                            else { kind = MouseEventKind::ScrollUp }
+
+                            kind
+                        };
+
                         match mouse_event.kind {
                             MouseEventKind::ScrollDown => {
-                                if self.location.row > 0 {
-                                    self.location.row -= 1;
+                                if self.plugin_manager.config.opt.natural_scroll { 
+                                    self.move_cursor_up()
+                                } else { 
+                                    self.move_cursor_down()
                                 }
-                                self.location.row = self.location.row.clamp(0, self.text.len() as u16 - 1);
-                                
-                                if (self.location.row as i16) < self.scroll_offset as i16 {
-                                    self.scroll_offset -= 1;
-                                }
-                                self.scroll_offset = self.scroll_offset.clamp(0, self.text.len() as u16 - 1);
                             }
                             MouseEventKind::ScrollUp => {
-                                if self.location.row < self.text.len() as u16 - 1 {
-                                    self.location.row += 1;
+                                if self.plugin_manager.config.opt.natural_scroll { 
+                                    self.move_cursor_down()
+                                } else { 
+                                    self.move_cursor_up()
                                 }
-                                self.location.row = self.location.row.clamp(0, self.text.len() as u16 - 1);
-                                
-                                let mut command_offset: u16 = 1;
-                                if self.mode == EditorMode::COMMAND { command_offset = 2; }
-
-                                if self.location.row >= self.size.rows - command_offset + self.scroll_offset {
-                                    self.scroll_offset += 1;
-                                }
-                                self.scroll_offset = self.scroll_offset.clamp(0, self.text.len() as u16 - 1);
                             }
                             MouseEventKind::ScrollRight => {
                                 if let Some(current_line) = self.text.get_mut(self.location.row as usize) {
@@ -270,6 +267,37 @@ impl Editor {
             let _ = write!(output, " ");
         }
     }
+
+    pub fn move_cursor_down(&mut self) {
+        if self.location.row < self.text.len() as u16 - 1 {
+            self.location.row += 1;
+        }
+        self.location.row = self.location.row.clamp(0, self.text.len() as u16 - 1);
+        
+        let mut command_offset: u16 = 1;
+        if self.mode == EditorMode::COMMAND { command_offset = 2; }
+
+        if self.location.row >= self.size.rows - command_offset + self.scroll_offset {
+            self.scroll_offset += 1;
+        }
+        self.scroll_offset = self.scroll_offset.clamp(0, self.text.len() as u16 - 1);
+    }
+
+    pub fn move_cursor_up(&mut self) {
+        if self.location.row > 0 {
+            self.location.row -= 1;
+        }
+        self.location.row = self.location.row.clamp(0, self.text.len() as u16 - 1);
+        
+        let mut command_offset: u16 = 1;
+        if self.mode == EditorMode::COMMAND { command_offset = 2; }
+
+        if self.location.row >= self.size.rows - command_offset + self.scroll_offset {            
+            self.scroll_offset -= 1;
+        }
+        self.scroll_offset = self.scroll_offset.clamp(0, self.text.len() as u16 - 1);
+    }
+
 
     pub fn handle_input(&mut self, event: KeyEvent) -> io::Result<EditorEvent> {
         match event.code {

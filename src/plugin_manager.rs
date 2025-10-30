@@ -9,7 +9,8 @@ use std::collections::HashMap;
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct Options {
-    pub relativenumbers: bool,
+    pub relative_numbers: bool,
+    pub natural_scroll: bool
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -32,7 +33,8 @@ impl PluginManager {
     pub fn new() -> Self {
         let config = Config {
             opt: Options {
-                relativenumbers: false,
+                relative_numbers: false,
+                natural_scroll: false,
             },
         };
 
