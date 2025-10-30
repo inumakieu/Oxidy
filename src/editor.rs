@@ -401,6 +401,12 @@ impl Editor {
                     }
                     self.location.row += 1;
                     self.location.col = 6;
+
+                    let mut command_offset = 2;
+                    if self.mode == EditorMode::COMMAND {command_offset = 3};
+                    if self.location.row - self.scroll_offset > self.size.rows - command_offset {
+                        self.scroll_offset += 1;
+                    }
                 }
             }
             _ => {}
