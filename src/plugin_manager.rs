@@ -1,9 +1,5 @@
 use std::{
-    fs::File,
-    io::{Read, Result},
-    path::PathBuf,
-    sync::mpsc::{self, Receiver, Sender},
-    thread,
+    ffi::OsString, fs::File, io::{Read, Result}, path::PathBuf, sync::mpsc::{self, Receiver, Sender}, thread
 };
 use std::sync::{Arc, Mutex};
 use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
@@ -43,27 +39,46 @@ impl PluginManager {
         let mut config_path = dirs::home_dir().expect("Could not find home directory.");
         config_path.push(".config/oxidy/config.rhai");
 
-        let mut config_file = File::open(&config_path).expect("Config file not found.");
-        let mut config_string = String::new();
-        config_file.read_to_string(&mut config_string).unwrap();
-
+        let config_file = File::open(&config_path);
         let engine = Engine::new();
-        let ast = engine.compile(&config_string).expect("AST creation failed.");
+        
+        let ret: Self;
 
-        Self {
-            engine,
-            ast,
-            config,
-            config_path,
-            syntax: Arc::new(Mutex::new(HashMap::new())),
-            rx: None,
+        if let Ok(mut config_file) = config_file {
+            let mut config_string = String::new();
+            config_file.read_to_string(&mut config_string).unwrap();
+ 
+            let ast = engine.compile(&config_string).expect("AST creation failed.");
+
+            ret = Self {
+                engine,
+                ast,
+                config,
+                config_path,
+                syntax: Arc::new(Mutex::new(HashMap::new())),
+                rx: None,
+            }
+        } else {
+            let ast = engine.compile("").unwrap();
+            ret = Self {
+                engine,
+                ast,
+                config,
+                config_path,
+                syntax: Arc::new(Mutex::new(HashMap::new())),
+                rx: None
+            }
         }
+
+        ret
     }
 
     /// Spawns a background thread that watches the config file
     pub fn start_watcher(&mut self) -> Result<()> {
         let (tx, rx) = mpsc::channel::<Event>();
-        let config_path = self.config_path.clone();
+        let mut config_path = self.config_path.clone();
+        
+        config_path.pop();
 
         // Spawn the watcher thread
         thread::spawn(move || {
@@ -109,19 +124,25 @@ impl PluginManager {
 
     /// Re-loads and re-evaluates the Rhai config
     pub fn reload_config(&mut self) {
-        let mut config_file = File::open(&self.config_path).expect("Config file not found.");
-        let mut config_string = String::new();
-        config_file.read_to_string(&mut config_string).unwrap();
+        let config_file = File::open(&self.config_path);
 
-        match self.engine.compile(&config_string) {
-            Ok(ast) => {
-                self.ast = ast;
-                self.load_config();
-                // println!("Config reloaded successfully!");
+        match config_file {
+            Ok(mut config_file) => {
+                let mut config_string = String::new();
+                config_file.read_to_string(&mut config_string).unwrap();
+
+                match self.engine.compile(&config_string) {
+                    Ok(ast) => {
+                        self.ast = ast;
+                        self.load_config();
+                        // println!("Config reloaded successfully!");
+                    }
+                    Err(err) => {
+                        println!("Error reloading config: {:?}", err);
+                    }
+                }
             }
-            Err(err) => {
-                println!("Error reloading config: {:?}", err);
-            }
+            Err(error) => {}
         }
     }
 
