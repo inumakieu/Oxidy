@@ -136,6 +136,8 @@ impl Editor {
                         }
                     }
                     Event::Mouse(mouse_event) => {
+                        if self.text.is_empty() { continue; };
+
                         match mouse_event.kind {
                             MouseEventKind::ScrollDown => {
                                 if self.location.row > 0 {
