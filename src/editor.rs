@@ -4,7 +4,7 @@ use std::time::Duration;
 use std::fs::{File, write};
 
 use crossterm::cursor::{self, MoveTo, SetCursorStyle};
-use crossterm::event::{poll, read, Event, KeyCode, KeyEvent};
+use crossterm::event::{poll, read, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, MouseEvent, MouseEventKind};
 use crossterm::style::{self, Color, ContentStyle, PrintStyledContent, ResetColor, SetBackgroundColor, SetForegroundColor, SetStyle, StyledContent, Stylize}; 
 use crossterm::{terminal, ExecutableCommand, QueueableCommand};
 use crossterm::queue;
@@ -35,6 +35,7 @@ impl Editor {
         let mut output = stdout();
         output.execute(terminal::EnterAlternateScreen).expect("Could not enter Alternate Screen.");
         terminal::enable_raw_mode().expect("Could not enable raw mode.");
+        output.execute(EnableMouseCapture).expect("Could not enable mouse capture.");
 
         let term_size = terminal::size().expect("Size could not be determined.");
 
@@ -132,6 +133,59 @@ impl Editor {
                                 self.command = "".to_string();
                             }
                             EditorEvent::NONE => {}
+                        }
+                    }
+                    Event::Mouse(mouse_event) => {
+                        match mouse_event.kind {
+                            MouseEventKind::ScrollDown => {
+                                if self.location.row > 0 {
+                                    self.location.row -= 1;
+                                }
+                                self.location.row = self.location.row.clamp(0, self.text.len() as u16 - 1);
+                                
+                                if (self.location.row as i16) < self.scroll_offset as i16 {
+                                    self.scroll_offset -= 1;
+                                }
+                                self.scroll_offset = self.scroll_offset.clamp(0, self.text.len() as u16 - 1);
+                            }
+                            MouseEventKind::ScrollUp => {
+                                if self.location.row < self.text.len() as u16 - 1 {
+                                    self.location.row += 1;
+                                }
+                                self.location.row = self.location.row.clamp(0, self.text.len() as u16 - 1);
+                                
+                                let mut command_offset: u16 = 1;
+                                if self.mode == EditorMode::COMMAND { command_offset = 2; }
+
+                                if self.location.row >= self.size.rows - command_offset + self.scroll_offset {
+                                    self.scroll_offset += 1;
+                                }
+                                self.scroll_offset = self.scroll_offset.clamp(0, self.text.len() as u16 - 1);
+                            }
+                            MouseEventKind::ScrollRight => {
+                                if let Some(current_line) = self.text.get_mut(self.location.row as usize) {
+                                    self.location.col = self.location.col.clamp(6, 6 + current_line.len() as u16)    
+                                }
+
+                                self.location.col -= 1;
+                                self.location.col = self.location.col.clamp(6, self.size.cols as u16);
+                            }
+                            MouseEventKind::ScrollLeft => {
+                                if let Some(current_line) = self.text.get_mut(self.location.row as usize) {
+                                    self.location.col += 1;
+                                    self.location.col = self.location.col.clamp(6, current_line.len() as u16 + 6);
+                                }
+                            }
+                            MouseEventKind::Down(button) => {
+                                if button.is_left() {
+                                    let new_col = mouse_event.column;
+                                    let new_row = mouse_event.row + self.scroll_offset;
+
+                                    self.location.col = new_col;
+                                    self.location.row = new_row;
+                                }
+                            }
+                            _ => {}
                         }
                     }
                     Event::Resize(new_w, new_h) => {
@@ -493,6 +547,7 @@ impl Editor {
     pub fn cleanup(&mut self) {
         terminal::disable_raw_mode().expect("Could not disable raw mode.");
         self.output.execute(terminal::LeaveAlternateScreen).expect("Could not leave alternate screen.");
+        self.output.execute(DisableMouseCapture).expect("Could not disable mouse capture.");
     }
 }
 

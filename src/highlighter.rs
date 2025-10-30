@@ -77,7 +77,9 @@ impl Highlighter {
                 index += token.text.len();
                 continue;
             }
-            found.push(line.chars().nth(index).unwrap());
+            if let Some(char) = line.chars().nth(index) {
+                found.push(char);
+            }
 
             if index == line.len() - 1 {
                 found_tokens.push(
