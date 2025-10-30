@@ -78,6 +78,13 @@ impl Editor {
 
         self.text = lines;
         self.current_path = path.to_string();
+        
+        let file_type_index = path.to_string().rfind(".");
+        if let Some(file_type_index) = file_type_index {
+            let file_type = &path[file_type_index + 1..];
+
+            self.highlighter.init(file_type.to_string());
+        }
         Ok(())
     }
 

@@ -9,13 +9,14 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
 pub struct Highlighter {
-    pub rules: Arc<Mutex<HashMap<String, String>>>,
+    pub current_filetype: String,
+    pub rules: Arc<Mutex<HashMap<String, HashMap<String, String>>>>,
     pub colors: HashMap<String, Color>,
     pub cache: HashMap<u64, Vec<Token>>
 }
 
 impl Highlighter {
-    pub fn new(rules: Arc<Mutex<HashMap<String, String>>>) -> Self {
+    pub fn new(rules: Arc<Mutex<HashMap<String, HashMap<String, String>>>>) -> Self {
         let mut colors: HashMap<String, Color> = HashMap::new(); 
         colors.insert("keywords".to_string(), Color::Red);
         colors.insert("comments".to_string(), Color::DarkGrey);
@@ -24,7 +25,11 @@ impl Highlighter {
 
         // rules.push((Regex::new(r"\b(let|pub|impl|fn|use)\b").unwrap(), Color::Red));
         
-        Self { rules, colors, cache: HashMap::new() }
+        Self { current_filetype: "".to_string(), rules, colors, cache: HashMap::new() }
+    }
+
+    pub fn init(&mut self, current_filetype: String) {
+        self.current_filetype = current_filetype;
     }
 
     pub fn hash_bytes_default_hasher(&self, data: &[u8]) -> u64 {
@@ -48,9 +53,14 @@ impl Highlighter {
             return tokens;
         }
 
-        let rules = self.rules.lock().unwrap();
+        let syntax_map = self.rules.lock().unwrap();
+        let rules = syntax_map.get(&self.current_filetype);
+        if rules.is_none() {
+            tokens.push(Token { text: line.to_string(), offset: 0, style: Some(Color::White) });
+            return tokens
+        }
 
-        for (key, value) in rules.iter() {
+        for (key, value) in rules.unwrap().iter() {
             let re = Regex::new(&value).unwrap();
             
             re.captures_iter(line)
@@ -83,7 +93,7 @@ impl Highlighter {
 
             if index == line.len() - 1 {
                 found_tokens.push(
-                    Token { text: found.clone(), offset: index - (found.len() - 1), style: Some(Color::Blue) }
+                    Token { text: found.clone(), offset: index - (found.len() - 1), style: Some(Color::White) }
                 );
                 found = "".to_string();
             }

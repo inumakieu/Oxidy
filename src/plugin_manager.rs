@@ -3,9 +3,27 @@ use std::{
 };
 use std::sync::{Arc, Mutex};
 use notify::{Event, EventKind, RecursiveMode, Watcher};
-use rhai::{Engine, Scope, Dynamic, serde::{from_dynamic, to_dynamic}};
+use rhai::{serde::{from_dynamic, to_dynamic}, Dynamic, Engine, FnPtr, NativeCallContext, EvalAltResult, Scope};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct ColorScheme {
+    pub default: ColorStyle,
+
+    pub bar: ColorStyle,
+
+    pub keyword: ColorStyle,
+    pub function: ColorStyle,
+    pub comment: ColorStyle,
+    pub literal: ColorStyle
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct ColorStyle {
+    pub fg: String,
+    pub bg: String,
+}
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct Options {
@@ -23,10 +41,12 @@ pub struct PluginManager {
     pub config: Config,
     pub config_path: PathBuf,
     pub ast: rhai::AST,
-    pub syntax: Arc<Mutex<HashMap<String, String>>>,
+    pub syntax: Arc<Mutex<HashMap<String, HashMap<String, String>>>>,
+    pub current_lang: Arc<Mutex<Option<String>>>,
 
-    // Channel for file watch events
     pub rx: Option<Receiver<Event>>,
+    
+    pub color_schemes: HashMap<String, ColorScheme>
 }
 
 impl PluginManager {
@@ -45,6 +65,7 @@ impl PluginManager {
         let engine = Engine::new();
         
         let ret: Self;
+        let current_lang: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
 
         if let Ok(mut config_file) = config_file {
             let mut config_string = String::new();
@@ -58,7 +79,9 @@ impl PluginManager {
                 config,
                 config_path,
                 syntax: Arc::new(Mutex::new(HashMap::new())),
+                current_lang,
                 rx: None,
+                color_schemes: HashMap::new(),
             }
         } else {
             let ast = engine.compile("").unwrap();
@@ -68,7 +91,9 @@ impl PluginManager {
                 config,
                 config_path,
                 syntax: Arc::new(Mutex::new(HashMap::new())),
-                rx: None
+                current_lang,
+                rx: None,
+                color_schemes: HashMap::new(),
             }
         }
 
@@ -152,15 +177,37 @@ impl PluginManager {
         let mut scope = Scope::new();
         let oxidy_config_struct = to_dynamic(self.config.clone()).unwrap();
         scope.set_value("oxidy", oxidy_config_struct);
+        
+        {
+            let syntax_map = self.syntax.clone();         // Arc<Mutex<HashMap<String, HashMap<String, String>>>>
+            let current_lang = self.current_lang.clone(); // Arc<Mutex<Option<String>>>
+            self.engine.register_fn("set_syntax", move |key: String, value: String| {
+                // read lang, then drop the lock
+                let lang = {
+                    let guard = current_lang.lock().unwrap();
+                    guard.clone() // Option<String>
+                }.expect("set_syntax called outside of a syntax(...) block");
 
-        // print!("Config");
-        let syntax_map = self.syntax.clone();
-        self.engine.register_fn("set_syntax", move |key: String, value: String| {
-            let mut map = syntax_map.lock().unwrap(); 
-            map.insert(key, value);
-            // print!("syntax set.");
-        });
+                // write into syntax[lang][key] = value, creating the maps if needed
+                let mut all = syntax_map.lock().unwrap();
+                all.entry(lang).or_default().insert(key, value);
+            });
+        }
 
+        {
+            let current_lang = self.current_lang.clone(); 
+
+            self.engine.register_fn("syntax", move |ctx: NativeCallContext, name: &str, callback: FnPtr| {
+                {
+                    let mut slot = current_lang.lock().unwrap();
+                    *slot = Some(name.to_string());
+                }
+                let _: () = callback.call_within_context(
+                    &ctx, 
+                    ()
+                ).unwrap();
+            });
+        }
         let _ = self.engine.eval_ast_with_scope::<()>(&mut scope, &self.ast);
 
         let script_result: Dynamic = self.engine.eval_with_scope(&mut scope, "oxidy").unwrap();
