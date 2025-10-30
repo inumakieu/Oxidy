@@ -462,7 +462,7 @@ impl Editor {
             let line_number = {
                 let current_line = self.location.row as i16 + 1;
                 let line_number: StyledContent<String>;
-                if self.plugin_manager.config.opt.relativenumbers {
+                if self.plugin_manager.config.opt.relative_numbers {
                     // TODO: Add relative numbers back
                     let signed_row = row as i16 + 1;
                     let signed_scroll_offset = self.scroll_offset as i16;
@@ -557,7 +557,7 @@ impl Editor {
 
         // TODO: Add file path
         let left_bar = format!(" Oxidy ").black().on_white();
-        let left_chevron = "".to_string().reset().white(); 
+        let left_chevron = "".to_string().reset().white(); 
 
         let mode_text: &str;
         match self.mode {

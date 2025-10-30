@@ -9,7 +9,6 @@ pub mod plugin_manager;
 
 use crossterm::cursor;
 use crossterm::terminal;
-use crossterm::terminal::LeaveAlternateScreen;
 use crossterm::ExecutableCommand;
 use editor::Editor;
 
