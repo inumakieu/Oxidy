@@ -1,5 +1,6 @@
 use std::io;
 use std::env;
+use std::io::Write;
 use std::panic;
 
 pub mod types;
@@ -9,6 +10,7 @@ pub mod plugin_manager;
 
 use crossterm::cursor;
 use crossterm::terminal;
+use crossterm::terminal::EndSynchronizedUpdate;
 use crossterm::ExecutableCommand;
 use editor::Editor;
 
@@ -17,6 +19,8 @@ fn main() -> io::Result<()> {
     args.next();
 
     panic::set_hook(Box::new(|info| {
+        let _ = std::io::stdout().execute(EndSynchronizedUpdate);
+        let _ = std::io::stdout().flush();
         let _ = terminal::disable_raw_mode();
         let _ = std::io::stdout().execute(cursor::Show);
         let _ = std::io::stdout().execute(terminal::LeaveAlternateScreen);
