@@ -240,7 +240,13 @@ impl Editor {
                 EditorMode::INSERT | EditorMode::NORMAL => {
                     if let Some(current_line) = self.text.get(self.location.row as usize) {
                         self.location.col = self.location.col.clamp(6, 6 + current_line.len() as u16);
-                        self.output.queue(MoveTo(self.location.col, self.location.row - self.scroll_offset))?;
+                        self.location.row = self.location.row.clamp(0, self.text.len() as u16 - 1);
+                        let checked_row = self.location.row.checked_sub(self.scroll_offset);
+                        if let Some(checked_row) = checked_row {
+                            self.output.queue(MoveTo(self.location.col, checked_row))?;
+                        } else {
+                            self.output.queue(MoveTo(self.location.col, 0))?;
+                        }
                     } else {
                         self.output.queue(MoveTo(6, 0))?;
                     }
@@ -293,11 +299,8 @@ impl Editor {
             self.location.row -= 1;
         }
         self.location.row = self.location.row.clamp(0, self.text.len() as u16 - 1);
-        
-        let mut command_offset: u16 = 1;
-        if self.mode == EditorMode::COMMAND { command_offset = 2; }
 
-        if self.location.row >= self.size.rows - command_offset + self.scroll_offset {            
+        if (self.location.row as i16) < self.scroll_offset as i16 {            
             self.scroll_offset -= 1;
         }
         self.scroll_offset = self.scroll_offset.clamp(0, self.text.len() as u16 - 1);
@@ -348,29 +351,10 @@ impl Editor {
                 }
             }
             KeyCode::Up => {
-                if self.location.row > 0 {
-                    self.location.row -= 1;
-                }
-                self.location.row = self.location.row.clamp(0, self.text.len() as u16 - 1);
-                
-                if (self.location.row as i16) < self.scroll_offset as i16 {
-                    self.scroll_offset -= 1;
-                }
-                self.scroll_offset = self.scroll_offset.clamp(0, self.text.len() as u16 - 1);
+                self.move_cursor_up();
             }
             KeyCode::Down => {
-                if self.location.row < self.text.len() as u16 - 1 {
-                    self.location.row += 1;
-                }
-                self.location.row = self.location.row.clamp(0, self.text.len() as u16 - 1);
-                
-                let mut command_offset: u16 = 1;
-                if self.mode == EditorMode::COMMAND { command_offset = 2; }
-
-                if self.location.row >= self.size.rows - command_offset + self.scroll_offset {
-                    self.scroll_offset += 1;
-                }
-                self.scroll_offset = self.scroll_offset.clamp(0, self.text.len() as u16 - 1);
+                self.move_cursor_down();
             }
             KeyCode::Left => {
                 if let Some(current_line) = self.text.get_mut(self.location.row as usize) {
