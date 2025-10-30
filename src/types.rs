@@ -1,4 +1,4 @@
-use crossterm::style::{Color, ContentStyle, Stylize};
+use crossterm::style::{Color, ContentStyle};
 use std::fs::File;
 use std::io::{Write, Result};
 use std::path::Path;

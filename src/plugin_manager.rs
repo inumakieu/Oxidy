@@ -1,8 +1,8 @@
 use std::{
-    ffi::OsString, fs::File, io::{Read, Result}, path::PathBuf, sync::mpsc::{self, Receiver, Sender}, thread
+    fs::File, io::{Read, Result}, path::PathBuf, sync::mpsc::{self, Receiver}, thread
 };
 use std::sync::{Arc, Mutex};
-use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
+use notify::{Event, EventKind, RecursiveMode, Watcher};
 use rhai::{Engine, Scope, Dynamic, serde::{from_dynamic, to_dynamic}};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -144,7 +144,7 @@ impl PluginManager {
                     }
                 }
             }
-            Err(error) => {}
+            Err(_error) => {}
         }
     }
 

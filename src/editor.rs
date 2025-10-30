@@ -4,8 +4,8 @@ use std::time::Duration;
 use std::fs::{File, write};
 
 use crossterm::cursor::{self, MoveTo, SetCursorStyle, Show};
-use crossterm::event::{poll, read, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, MouseEvent, MouseEventKind};
-use crossterm::style::{self, Color, ContentStyle, PrintStyledContent, ResetColor, SetBackgroundColor, SetForegroundColor, SetStyle, StyledContent, Stylize}; 
+use crossterm::event::{poll, read, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, MouseEventKind};
+use crossterm::style::{Color, ContentStyle, ResetColor, SetStyle, StyledContent, Stylize}; 
 use crossterm::{terminal, ExecutableCommand, QueueableCommand};
 use crossterm::queue;
 
@@ -136,15 +136,7 @@ impl Editor {
                         }
                     }
                     Event::Mouse(mouse_event) => {
-                        if self.text.is_empty() { continue; };
-
-                        let scroll_up_kind = {
-                            let kind: MouseEventKind;
-                            if self.plugin_manager.config.opt.natural_scroll { kind = MouseEventKind::ScrollDown; }
-                            else { kind = MouseEventKind::ScrollUp }
-
-                            kind
-                        };
+                        if self.text.is_empty() { continue; }; 
 
                         match mouse_event.kind {
                             MouseEventKind::ScrollDown => {
@@ -206,6 +198,9 @@ impl Editor {
                 }
                 self.render_buffer.current[self.size.rows as usize - 1] = render_line;
             }
+
+            // TEMP
+            self.test_card()?;
             
             // diff render_buffer 
             if self.render_buffer.current.len() == 0 {
@@ -449,11 +444,16 @@ impl Editor {
 
         for row in 0..(self.size.rows - command_offset) {
             let line = self.text.get(row as usize + self.scroll_offset as usize);
-            let mut current_render_line = RenderLine { cells: Vec::new() };
+            let mut current_render_line = RenderLine { 
+                cells: vec![
+                    RenderCell { ch: ' ', style: ContentStyle::new().reset() };
+                    self.size.cols as usize
+                ]
+            };
             if line.is_none() {
                 let empty = "    ∼ ".to_string().on(Color::Reset).dark_grey();
-                for char in empty.content().chars() {
-                    current_render_line.cells.push(RenderCell { ch: char, style: empty.style().clone() });
+                for (index, char) in empty.content().chars().enumerate() {
+                    current_render_line.cells[index] = RenderCell { ch: char, style: empty.style().clone() };
                 }
                 self.render_buffer.current[row as usize] = current_render_line;
                 continue;
@@ -484,19 +484,26 @@ impl Editor {
             };
             let content = line_number.content();
             let style = line_number.style();
-            let mut current_render_line = RenderLine { cells: Vec::new() };
-            for char in content.chars() {
-                current_render_line.cells.push(RenderCell { ch: char, style: style.clone() });
+            let mut current_render_line = RenderLine { 
+                cells: vec![
+                    RenderCell { ch: ' ', style: ContentStyle::new().reset() };
+                    self.size.cols as usize
+                ]
+
+            };
+            for (index, char) in content.chars().enumerate() {
+                current_render_line.cells[index] = RenderCell { ch: char, style: style.clone() };
             }
 
             let styled_line = self.highlighter.highlight(line.unwrap());
             for token in styled_line {
-                for char in token.text.chars() {
+                for (index, char) in token.text.chars().enumerate() {
                     let text_style = ContentStyle::new()
                         .on(Color::Reset)
                         .with(token.style.unwrap_or(Color::White));
-                    current_render_line.cells.push(RenderCell { ch: char, style: text_style });
-
+                    if index + 6 + token.offset < self.size.cols as usize {
+                        current_render_line.cells[index + 6 + token.offset] = RenderCell { ch: char, style: text_style };
+                    }
                 }
             }
 
@@ -556,8 +563,15 @@ impl Editor {
 
 
         // TODO: Add file path
-        let left_bar = format!(" Oxidy ").black().on_white();
-        let left_chevron = "".to_string().reset().white(); 
+        let left_bar = format!(" Oxidy ").bold().black().on_white();
+        let right_symbol = "".to_string().reset().white();
+        let left_symbol = "".to_string().reset().white();
+
+        let mut file_name = " empty ".to_string();
+        if let Some(file_name_index) = self.current_path.rfind("/") {
+            file_name = format!(" {} ", self.current_path[file_name_index + 1..].to_string());
+        }
+        let file_name_bar = file_name.black().on_white();
 
         let mode_text: &str;
         match self.mode {
@@ -567,12 +581,21 @@ impl Editor {
         }
 
         let right_bar = format!(" {:02}:{:02} {}", self.location.col - 5, self.location.row + 1, mode_text).black().on_white();
-        let right_chevron = "".to_string().reset().white(); 
+        
+        let spacing = " ".to_string().reset();
 
-        let gap: u16 = self.size.cols - 1 - (left_bar.content().len() + 2 + right_bar.content().len()) as u16;
+        let gap: u16 = self.size.cols - 1 - (
+            1 + left_bar.content().len() + 1 + 1 +
+            1 + file_name_bar.content().len() + 1 +
+            1 + right_bar.content().len() + 1) as u16;
         let gap_content = StyledContent::new(ContentStyle::new().reset(), format!("{}", " ".repeat(gap as usize)));
 
-        let status_bar = vec![left_bar, left_chevron, gap_content, right_chevron, right_bar];
+        let status_bar = vec![
+            left_symbol.clone(), left_bar, right_symbol.clone(),
+            spacing.clone(),
+            left_symbol.clone(), file_name_bar, right_symbol.clone(),
+            gap_content, 
+            left_symbol.clone(), right_bar, right_symbol.clone()];
         for item in status_bar {
             for char in item.content().chars() {
                 render_line.cells.push(
@@ -583,6 +606,72 @@ impl Editor {
         
         self.render_buffer.current[self.size.rows as usize - command_offset] = render_line;
         
+        Ok(())
+    }
+
+    pub fn test_card(&mut self) -> io::Result<()> {
+        let top_left = '╭';
+        let top_right = '╮';
+        let bottom_left = '╰';
+        let bottom_right = '╯';
+
+        let horizontal = '─';
+        let vertical = '│';
+
+        let max_width = 63;
+        let max_height = 12;
+        let padding = 1;
+        let test_string = "An error occurred, but please don't ask which one. As this is currently manually added, I don't actually know. But it seems to work well for a test.";
+        
+        let lines = test_string.chars()
+            .collect::<Vec<char>>()
+            .chunks(max_width - 2 - (padding * 2)).into_iter()
+            .map(|chunk| chunk.iter().collect::<String>())
+            .collect::<Vec<_>>();
+
+        let width = 63;
+        let height = lines.len() + 2;
+        let offset = self.size.cols as usize - width - 1;
+        
+        let mut command_offset = 1;
+        if self.mode == EditorMode::COMMAND { command_offset = 2 }
+
+        for y in 0..height {
+            let mut render_line = self.render_buffer.current[self.size.rows as usize - command_offset - (height - y)].clone();            
+            let mut char: char;
+            for x in 0..width {
+                if y == 0 {
+                    if x == 0 {
+                        char = top_left.clone();
+                    } else if x == width - 1 {
+                        char = top_right.clone();
+                    } else {
+                        char = horizontal.clone();
+                    }
+                } else if y == height - 1 {
+                    if x == 0 {
+                        char = bottom_left.clone();
+                    } else if x == width - 1 {
+                        char = bottom_right.clone();
+                    } else {
+                        char = horizontal.clone();
+                    }
+                } else {
+                    if x == 0 || x == width - 1 {
+                        char = vertical.clone();
+                    } else if x <= padding || x >= width - 1 - padding {
+                        char = ' ';
+                    } else { 
+                        let mut chars = lines[y - 1].chars();
+                        char = chars.nth(x - 1 - padding).unwrap_or(' ');
+                    }
+                }
+                render_line.cells[x + offset] = RenderCell { ch: char, style: ContentStyle::new().on(Color::Reset).red() };
+
+            }
+            self.render_buffer.current[self.size.rows as usize - command_offset - (height - y)] = render_line
+        }
+
         Ok(())
     }
 
