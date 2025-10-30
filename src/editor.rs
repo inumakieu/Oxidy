@@ -156,17 +156,17 @@ impl Editor {
                                 }
                             }
                             MouseEventKind::ScrollRight => {
-                                if let Some(current_line) = self.text.get_mut(self.location.row as usize) {
-                                    self.location.col = self.location.col.clamp(6, 6 + current_line.len() as u16)    
+                                if self.plugin_manager.config.opt.natural_scroll {
+                                    self.move_cursor_left();
+                                } else {
+                                    self.move_cursor_right()
                                 }
-
-                                self.location.col -= 1;
-                                self.location.col = self.location.col.clamp(6, self.size.cols as u16);
                             }
                             MouseEventKind::ScrollLeft => {
-                                if let Some(current_line) = self.text.get_mut(self.location.row as usize) {
-                                    self.location.col += 1;
-                                    self.location.col = self.location.col.clamp(6, current_line.len() as u16 + 6);
+                                if self.plugin_manager.config.opt.natural_scroll {
+                                    self.move_cursor_right();
+                                } else {
+                                    self.move_cursor_left()
                                 }
                             }
                             MouseEventKind::Down(button) => {
@@ -306,6 +306,20 @@ impl Editor {
         self.scroll_offset = self.scroll_offset.clamp(0, self.text.len() as u16 - 1);
     }
 
+    pub fn move_cursor_left(&mut self) {
+        if let Some(current_line) = self.text.get_mut(self.location.row as usize) {
+            self.location.col -= 1;
+            self.location.col = self.location.col.clamp(6, 6 + current_line.len() as u16);
+        } 
+    }
+
+    pub fn move_cursor_right(&mut self) {
+        if let Some(current_line) = self.text.get_mut(self.location.row as usize) {
+            self.location.col += 1;
+            self.location.col = self.location.col.clamp(6, 6 + current_line.len() as u16 + 6);
+        }
+    }
+
 
     pub fn handle_input(&mut self, event: KeyEvent) -> io::Result<EditorEvent> {
         match event.code {
@@ -357,18 +371,10 @@ impl Editor {
                 self.move_cursor_down();
             }
             KeyCode::Left => {
-                if let Some(current_line) = self.text.get_mut(self.location.row as usize) {
-                    self.location.col = self.location.col.clamp(6, 6 + current_line.len() as u16)    
-                }
-
-                self.location.col -= 1;
-                self.location.col = self.location.col.clamp(6, self.size.cols as u16);
+                self.move_cursor_left();
             }
             KeyCode::Right => {
-                if let Some(current_line) = self.text.get_mut(self.location.row as usize) {
-                    self.location.col += 1;
-                    self.location.col = self.location.col.clamp(6, current_line.len() as u16 + 6);
-                }
+                self.move_cursor_right();
             }
             KeyCode::Backspace => {
                 if self.mode == EditorMode::INSERT {
