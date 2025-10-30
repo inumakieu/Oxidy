@@ -356,7 +356,9 @@ impl Editor {
                     if let Some(current_line) = self.text.get_mut(self.location.row as usize) {
                         if self.location.col == 6 {
                             self.text.remove(self.location.row as usize);
-                            self.location.row -= 1;
+                            if self.location.row > 0 {
+                                self.location.row -= 1;
+                            }
                             if let Some(new_row) = self.text.get(self.location.row as usize) {
                                 self.location.col = new_row.len() as u16 + 6;
                             }
