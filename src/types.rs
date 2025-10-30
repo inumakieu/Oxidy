@@ -1,4 +1,4 @@
-use crossterm::style::{Color, ContentStyle};
+use crossterm::style::{Color, ContentStyle, Stylize};
 use std::fs::File;
 use std::io::{Write, Result};
 use std::path::Path;
@@ -61,6 +61,39 @@ pub struct RenderLine {
 pub struct RenderBuffer {
     pub drawn: Vec<RenderLine>,
     pub current: Vec<RenderLine>
+}
+
+#[derive(Clone, PartialEq)]
+pub enum CardType {
+    INFO,
+    WARNING,
+    ERROR
+}
+
+#[derive(Clone, PartialEq)]
+pub struct Card {
+    pub descripiton: String,
+    pub card_type: CardType
+}
+
+impl Card {
+    pub fn get_lines(&self, max_width: usize) -> Vec<String> {
+        self.descripiton.chars()
+            .collect::<Vec<char>>()
+            .chunks(max_width).into_iter()
+            .map(|chunk| chunk.iter().collect::<String>())
+            .collect::<Vec<_>>()
+    }
+}
+
+impl CardType {
+    pub fn style(&self) -> ContentStyle {
+        match self {
+            Self::INFO => { return ContentStyle::new().on(Color::Reset).white() }
+            Self::WARNING => { return ContentStyle::new().on(Color::Reset).yellow() }
+            Self::ERROR => { return ContentStyle::new().on(Color::Reset).red() }
+        }
+    }
 }
 
 impl RenderBuffer {

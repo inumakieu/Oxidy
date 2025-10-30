@@ -10,7 +10,7 @@ use crossterm::{terminal, ExecutableCommand, QueueableCommand};
 use crossterm::queue;
 
 use crate::plugin_manager::PluginManager;
-use crate::types::{EditorEvent, EditorMode, Location, RenderBuffer, RenderCell, RenderLine, Size};
+use crate::types::{Card, CardType, EditorEvent, EditorMode, Location, RenderBuffer, RenderCell, RenderLine, Size};
 use crate::highlighter::Highlighter;
 
 pub struct Editor {
@@ -21,6 +21,7 @@ pub struct Editor {
     
     pub render_buffer: RenderBuffer,
     pub text: Vec<String>,
+    pub cards: Vec<Card>, // To be changed.
     
     pub location: Location,
     pub current_path: String,
@@ -54,6 +55,7 @@ impl Editor {
             command: "".to_string(),
             render_buffer: RenderBuffer { drawn: Vec::new(), current: Vec::new() },
             text: Vec::new(),
+            cards: Vec::new(),
             location: Location { col: 6, row: 0 },
             current_path: "".to_string(),
             scroll_offset: 0,
@@ -200,7 +202,15 @@ impl Editor {
             }
 
             // TEMP
-            self.test_card()?;
+            if self.cards.is_empty() {
+                self.cards.push(
+                    Card { 
+                        descripiton: "This is a very long error message, that i have manually written out. This probably shows that currently there is no smart line wrapping. I will add that later.".to_string(), 
+                        card_type: CardType::WARNING 
+                    }
+                );
+            }
+            self.render_cards()?;
             
             // diff render_buffer 
             if self.render_buffer.current.len() == 0 {
@@ -609,7 +619,16 @@ impl Editor {
         Ok(())
     }
 
-    pub fn test_card(&mut self) -> io::Result<()> {
+    pub fn render_cards(&mut self) -> io::Result<()> {
+        let cards = self.cards.clone();
+        for card in cards.iter() {
+            self.render_card(card)?;
+        }
+
+        Ok(())
+    }
+
+    pub fn render_card(&mut self, card: &Card) -> io::Result<()> {
         let top_left = '╭';
         let top_right = '╮';
         let bottom_left = '╰';
@@ -621,18 +640,12 @@ impl Editor {
         let max_width = 63;
         let max_height = 12;
         let padding = 1;
-        let test_string = "An error occurred, but please don't ask which one. As this is currently manually added, I don't actually know. But it seems to work well for a test.";
         
-        let lines = test_string.chars()
-            .collect::<Vec<char>>()
-            .chunks(max_width - 2 - (padding * 2)).into_iter()
-            .map(|chunk| chunk.iter().collect::<String>())
-            .collect::<Vec<_>>();
-
-        let width = 63;
-        let height = lines.len() + 2;
+        let lines = card.get_lines(max_width - 2 - (padding * 2));
+        let width = max_width;
+        let height = (lines.len() + 2).clamp(3, max_height);
         let offset = self.size.cols as usize - width - 1;
-        
+        let style = card.card_type.style();
         let mut command_offset = 1;
         if self.mode == EditorMode::COMMAND { command_offset = 2 }
 
@@ -666,7 +679,7 @@ impl Editor {
                         char = chars.nth(x - 1 - padding).unwrap_or(' ');
                     }
                 }
-                render_line.cells[x + offset] = RenderCell { ch: char, style: ContentStyle::new().on(Color::Reset).red() };
+                render_line.cells[x + offset] = RenderCell { ch: char, style: style };
 
             }
             self.render_buffer.current[self.size.rows as usize - command_offset - (height - y)] = render_line
