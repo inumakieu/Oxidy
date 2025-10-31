@@ -8,6 +8,7 @@ use crossterm::event::{poll, read, DisableMouseCapture, EnableMouseCapture, Even
 use crossterm::style::{Color, ContentStyle, ResetColor, SetStyle, StyledContent, Stylize}; 
 use crossterm::{terminal, ExecutableCommand, QueueableCommand};
 use crossterm::queue;
+use unicode_width::UnicodeWidthChar;
 
 use crate::plugin_manager::PluginManager;
 use crate::types::{Card, CardType, EditorEvent, EditorMode, Location, RenderBuffer, RenderCell, RenderLine, Size};
@@ -217,7 +218,7 @@ impl Editor {
                     }
                 );
             }
-            self.render_cards()?;
+            // self.render_cards()?;
             
             // diff render_buffer 
             if self.render_buffer.current.len() == 0 {
@@ -271,7 +272,8 @@ impl Editor {
     
     pub fn redraw_line(&self, output: &mut StdoutLock, render_line: &RenderLine) {
         let mut current_style: Option<ContentStyle> = None;
-        for col in 0..self.size.cols - 1 {// render_line.cells.clone() {
+        let mut col = 0;
+        while col <= self.size.cols - 1 {// render_line.cells.clone() {
             if let Some(cell) = render_line.cells.get(col as usize) {
                 if current_style == None || cell.style != current_style.unwrap() {
                     let _ = queue!(output, SetStyle(cell.style));
@@ -279,10 +281,13 @@ impl Editor {
                 }
                 let _ = write!(output, "{}", cell.ch);
 
+                col += UnicodeWidthChar::width(cell.ch).unwrap_or(1) as u16;
                 continue;
             }
             let _ = queue!(output, ResetColor);
             let _ = write!(output, " ");
+            
+            col += 1;
         }
     }
 
@@ -504,60 +509,19 @@ impl Editor {
 
             let styled_line = self.highlighter.highlight(line.unwrap());
             for token in styled_line {
-                for (index, char) in token.text.chars().enumerate() {
+                let mut x = 6 + token.offset;
+                for char in token.text.chars() {
                     let text_style = ContentStyle::new()
                         .on(Color::Reset)
                         .with(token.style.unwrap_or(Color::White));
-                    if index + 6 + token.offset < self.size.cols as usize {
-                        current_render_line.cells[index + 6 + token.offset] = RenderCell { ch: char, style: text_style };
+                    if x < self.size.cols as usize {
+                        current_render_line.cells[x] = RenderCell { ch: char, style: text_style };
+                        x += (UnicodeWidthChar::width(char).unwrap_or(1));
                     }
                 }
             }
 
             self.render_buffer.current[row as usize] = current_render_line;
-
-            /*
-            self.output
-                .queue(MoveTo(0, row))?;
-            if let Some(line) = self.text.get(row as usize + self.scroll_offset as usize) {
-                let current_line = self.location.row as i16 + 1;
-                
-                if self.plugin_manager.config.opt.relativenumbers {
-                    let signed_row = row as i16 + 1;
-                    let signed_scroll_offset = self.scroll_offset as i16;
-                    let relative_distance = (current_line - (signed_row + signed_scroll_offset)).abs();
-                    if current_line == signed_row + signed_scroll_offset { 
-                        print!("{:5} ", current_line);
-                    } else {
-                        self.output
-                            .queue(
-                                PrintStyledContent(
-                                    format!("{:5} ", relative_distance).dark_grey()
-                                )
-                            )?;
-                    }
-                } else {
-                    if current_line == row as i16 + self.scroll_offset as i16 + 1 { 
-                        print!("{:5} ", current_line);
-                    } else {
-                        self.output
-                            .queue(
-                                PrintStyledContent(
-                                    format!("{:5} ", row + self.scroll_offset + 1).dark_grey()
-                                )
-                            )?;
-                    }
-                }
-
-                let styled_line = self.highlighter.highlight(line);
-                for token in styled_line {
-                     self.output.queue(PrintStyledContent(token.text.with(token.style.unwrap_or(Color::White))))?;
-                }
-            } else {
-                self.output.queue(PrintStyledContent("    ∼ ".dark_grey()))?;
-                
-            }
-            */
         }
 
         Ok(())

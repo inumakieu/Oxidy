@@ -10,3 +10,4 @@ notify = "8.2.0"
 regex = "1.12.2"
 rhai = { version = "1.23.4", features = ["serde"] }
 serde = "1.0.228"
+unicode-width = "0.2.2"
