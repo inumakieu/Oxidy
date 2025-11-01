@@ -218,7 +218,7 @@ impl Editor {
                     }
                 );
             }
-            // self.render_cards()?;
+            self.render_cards()?;
             
             // diff render_buffer 
             if self.render_buffer.current.len() == 0 {
