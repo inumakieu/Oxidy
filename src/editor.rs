@@ -10,6 +10,14 @@ use crossterm::{terminal, ExecutableCommand, QueueableCommand};
 use crossterm::queue;
 use unicode_width::UnicodeWidthChar;
 
+use crate::lsp::{DidOpenParams, SemanticTokenParams, SemanticTokenTextDocumentItem};
+use crate::lsp::InitializeClientCapabilities;
+use crate::lsp::InitializeParams;
+use crate::lsp::InitializedParams;
+use crate::lsp::LspClient;
+use crate::lsp::LspMessage;
+use crate::lsp::TextDocumentItem;
+
 use crate::plugin_manager::PluginManager;
 use crate::types::{Card, CardType, EditorEvent, EditorMode, Location, RenderBuffer, RenderCell, RenderLine, Size};
 use crate::highlighter::Highlighter;
@@ -29,7 +37,9 @@ pub struct Editor {
     pub scroll_offset: u16,
 
     pub highlighter: Highlighter,
-    pub plugin_manager: PluginManager
+    pub plugin_manager: PluginManager,
+
+    pub lsp_client: Option<LspClient>
 }
 
 impl Editor {
@@ -48,6 +58,7 @@ impl Editor {
         plugin_manager.start_watcher().unwrap();
 
         let highlighter = Highlighter::new(Arc::clone(&plugin_manager.syntax));
+        let client = LspClient::spawn();
 
         Self {
             mode: EditorMode::NORMAL,
@@ -61,7 +72,8 @@ impl Editor {
             current_path: "".to_string(),
             scroll_offset: 0,
             highlighter,
-            plugin_manager
+            plugin_manager,
+            lsp_client: client
         }
     }
 
@@ -86,6 +98,64 @@ impl Editor {
 
             self.highlighter.init(file_type.to_string());
         }
+
+        if let Some(client) = self.lsp_client.as_mut() {
+            let init = LspMessage {
+                jsonrpc: "2.0".into(),
+                id: Some(1),
+                method: "initialize".into(),
+                params: InitializeParams {
+                    capabilities: Some(InitializeClientCapabilities {}),
+                    root_uri: Some("file:///home/inumaki/dev/oxidy".into()),
+                },
+            };
+
+            client.send(init);
+            client.read();
+            
+            let initialized = LspMessage {
+                jsonrpc: "2.0".into(),
+                id: None,
+                method: "initialized".into(),
+                params: InitializedParams {},
+            };
+            client.send(initialized);
+
+            let open = LspMessage {
+                jsonrpc: "2.0".into(),
+                id: None,
+                method: "textDocument/didOpen".into(),
+                params: DidOpenParams {
+                    textDocument: TextDocumentItem {
+                        uri: "file:///home/inumaki/dev/oxidy/src/main.rs".into(),
+                        languageId: "rust".into(),
+                        version: 1,
+                        text: file_string,
+                    },
+                },
+            };
+
+            client.send(open);
+            client.read();
+
+            let syntax = LspMessage {
+                jsonrpc: "2.0".into(),
+                id: Some(4),
+                method: "textDocument/semanticTokens/full".into(),
+                params: SemanticTokenParams {
+                    textDocument: SemanticTokenTextDocumentItem {
+                        uri: "file:///home/inumaki/dev/oxidy/src/main.rs".into(),
+                    },
+                }
+            };
+
+            client.send(syntax);
+
+            self.cards.push(
+                Card { descripiton: client.read(), card_type: CardType::INFO }
+            );
+        }
+
         Ok(())
     }
 

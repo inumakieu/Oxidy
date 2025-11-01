@@ -7,12 +7,14 @@ pub mod types;
 pub mod highlighter;
 pub mod editor;
 pub mod plugin_manager;
+pub mod lsp;
 
 use crossterm::cursor;
 use crossterm::terminal;
 use crossterm::terminal::EndSynchronizedUpdate;
 use crossterm::ExecutableCommand;
 use editor::Editor;
+
 
 fn main() -> io::Result<()> {
     let mut args = env::args();
@@ -54,6 +56,6 @@ fn main() -> io::Result<()> {
         editor.load_file(&input_file)?;
     }
     editor.run()?;
- 
+
     Ok(())
 }

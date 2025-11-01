@@ -4,6 +4,7 @@ Oxidy is a terminal based code editor written in rust. It uses Crossterm to rend
 
 ### Features
 
+- [ ] Line wrapping / Line scrolling
 - [ ] Undo/Redo
 - [ ] Buffer
 - [ ] File management
