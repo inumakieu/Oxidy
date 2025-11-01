@@ -4,16 +4,16 @@ Oxidy is a terminal based code editor written in rust. It uses Crossterm to rend
 
 ### Features
 
-[] Undo/Redo
-[] Buffer
-[] File management
-[] Color schemes
-[] LSP
-    [] syntax highlighting
-    [] auto complete
-    [] type hints
+- [ ] Undo/Redo
+- [ ] Buffer
+- [ ] File management
+- [ ] Color schemes
+- [ ] LSP
+    - [ ] syntax highlighting
+    - [ ] auto complete
+    - [ ] type hints
 
 ### Known Bugs
 
-[] Visual bug when no config is added. (Ghostty)
+- [ ] Visual bug when no config is added. (Ghostty)
     -> Unable to reproduce
