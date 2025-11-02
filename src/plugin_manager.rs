@@ -107,6 +107,10 @@ impl PluginManager {
         
         config_path.pop();
 
+        if !config_path.try_exists().unwrap_or(false) {
+            return Ok(())
+        }
+
         // Spawn the watcher thread
         thread::spawn(move || {
             // clone the sender so the closure can capture it
@@ -138,6 +142,14 @@ impl PluginManager {
 
     /// Checks if a reload event occurred (non-blocking)
     pub fn poll_reload(&mut self) {
+        let mut config_path = self.config_path.clone();
+        
+        config_path.pop();
+
+        if !config_path.try_exists().unwrap_or(false) {
+            return 
+        }
+
         if let Some(rx) = &self.rx {
             if let Ok(event) = rx.try_recv() {
                 // println!("Config file changed: {:?}", event);
