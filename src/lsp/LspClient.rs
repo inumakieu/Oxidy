@@ -1,52 +1,6 @@
 use std::{io::{BufRead, BufReader, Read, Write}, process::{Child, ChildStdin, ChildStdout, Stdio}};
 
-use serde::{Deserialize, Serialize};
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct LspMessage<T> {
-    pub jsonrpc: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub id: Option<u64>,
-    pub method: String,
-    pub params: T,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct InitializeParams {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub capabilities: Option<InitializeClientCapabilities>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub root_uri: Option<String>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct InitializeClientCapabilities {}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct InitializedParams {}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct DidOpenParams {
-    pub textDocument: TextDocumentItem,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct SemanticTokenParams {
-    pub textDocument: SemanticTokenTextDocumentItem,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct SemanticTokenTextDocumentItem {
-    pub uri: String,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct TextDocumentItem {
-    pub uri: String,
-    pub languageId: String,
-    pub version: u64,
-    pub text: String,
-}
+use crate::lsp::{LspMessage::LspMessage, LspResponse::LspResponse};
 
 pub struct LspClient {
     pub process: Child,
@@ -91,7 +45,8 @@ impl LspClient {
         let _ = self.stdin.flush();
     }
 
-    pub fn read(&mut self) -> String {
+    pub fn read<T>(&mut self) -> Option<LspResponse<T>>
+    where T: for<'de> serde::Deserialize<'de> {
         // println!("Process status: {:?}", self.process.try_wait());
         let mut reader = BufReader::new(&mut self.stdout);
 
@@ -108,8 +63,11 @@ impl LspClient {
                         let response: String = response_buf.into_iter()
                             .map(|val| char::from_u32(val as u32).unwrap_or('\u{FFFD}'))
                             .collect();
-                        return response;
-                        // println!("{}", response);
+                        let resp_struct = serde_json::from_str(response.as_str());
+                        match resp_struct {
+                            Ok(resp_struct) => return Some(resp_struct),
+                            Err(_) => return None
+                        }
                     }
                     Err(e) => {
                         // Handle the error, e.g., if EOF is reached prematurely
@@ -143,7 +101,7 @@ impl LspClient {
                 }
             }
         }
-        "".to_string()
+        return None
     }
 }
 

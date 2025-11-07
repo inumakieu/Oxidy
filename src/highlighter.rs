@@ -12,7 +12,8 @@ pub struct Highlighter {
     pub current_filetype: String,
     pub rules: Arc<Mutex<HashMap<String, HashMap<String, String>>>>,
     pub colors: HashMap<String, Color>,
-    pub cache: HashMap<u64, Vec<Token>>
+    pub cache: HashMap<u64, Vec<Token>>,
+    pub tokens: Vec<Vec<Token>>
 }
 
 impl Highlighter {
@@ -25,7 +26,7 @@ impl Highlighter {
 
         // rules.push((Regex::new(r"\b(let|pub|impl|fn|use)\b").unwrap(), Color::Red));
         
-        Self { current_filetype: "".to_string(), rules, colors, cache: HashMap::new() }
+        Self { current_filetype: "".to_string(), rules, colors, cache: HashMap::new(), tokens: Vec::new() }
     }
 
     pub fn init(&mut self, current_filetype: String) {
@@ -38,8 +39,16 @@ impl Highlighter {
         hasher.finish()
     }
 
-    pub fn highlight(&mut self, line: &str) -> Vec<Token> {
+    pub fn highlight(&mut self, line: &str, index: usize) -> Vec<Token> {
         let mut tokens: Vec<Token> = Vec::new();
+
+        if !self.tokens.is_empty() {
+            let val =  self.tokens.get(index);
+            match val {
+                Some(val) => tokens.extend(val.clone()),
+                None => {}
+            }
+        }
 
         let checksum = self.hash_bytes_default_hasher(line.as_bytes());
 
@@ -53,23 +62,25 @@ impl Highlighter {
             return tokens;
         }
 
-        let syntax_map = self.rules.lock().unwrap();
-        let rules = syntax_map.get(&self.current_filetype);
-        if rules.is_none() {
-            tokens.push(Token { text: line.to_string(), offset: 0, style: Some(Color::White) });
-            return tokens
-        }
+        if tokens.is_empty() {
+            let syntax_map = self.rules.lock().unwrap();
+            let rules = syntax_map.get(&self.current_filetype);
+            if rules.is_none() {
+                tokens.push(Token { text: line.to_string(), offset: 0, style: Some(Color::White) });
+                return tokens
+            }
 
-        for (key, value) in rules.unwrap().iter() {
-            let re = Regex::new(&value).unwrap();
-            
-            re.captures_iter(line)
-                .for_each(|cap| {
-                    if let Some(cap) = cap.get(1) {
-                        tokens.push(Token { text: cap.as_str().to_string(), offset: cap.start(), style: Some(self.colors[key].clone()) })
+            for (key, value) in rules.unwrap().iter() {
+                let re = Regex::new(&value).unwrap();
+                
+                re.captures_iter(line)
+                    .for_each(|cap| {
+                        if let Some(cap) = cap.get(1) {
+                            tokens.push(Token { text: cap.as_str().to_string(), offset: cap.start(), style: Some(self.colors[key].clone()) })
 
-                    }
-                });
+                        }
+                    });
+            }
         }
 
         let mut found: String = "".to_string();

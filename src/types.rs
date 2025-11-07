@@ -17,10 +17,10 @@ pub enum EditorMode {
 
 #[derive(PartialEq)]
 pub enum EditorEvent {
-    EXIT,
-    SAVE,
-    CHANGE_MODE(EditorMode),
-    NONE
+    Exit,
+    Save,
+    ChangeMode(EditorMode),
+    None
 }
 
 #[derive(PartialEq)]
@@ -48,7 +48,7 @@ pub struct SyntaxRegex {
 
 #[derive(Clone, PartialEq)]
 pub struct RenderCell {
-    pub ch: char,
+    pub ch: String,
     pub style: ContentStyle
 }
 

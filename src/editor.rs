@@ -1,79 +1,58 @@
-use std::io::{self, stdout, Read, Stdout, StdoutLock, Write};
+#![allow(non_snake_case)]
+
+use std::io::{self, Read};
 use std::sync::Arc;
-use std::time::Duration;
-use std::fs::{File, write};
+use std::fs::File;
 
-use crossterm::cursor::{self, MoveTo, SetCursorStyle, Show};
-use crossterm::event::{poll, read, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, MouseEventKind};
-use crossterm::style::{Color, ContentStyle, ResetColor, SetStyle, StyledContent, Stylize}; 
-use crossterm::{terminal, ExecutableCommand, QueueableCommand};
-use crossterm::queue;
-use unicode_width::UnicodeWidthChar;
-
-use crate::lsp::{DidOpenParams, SemanticTokenParams, SemanticTokenTextDocumentItem};
-use crate::lsp::InitializeClientCapabilities;
-use crate::lsp::InitializeParams;
-use crate::lsp::InitializedParams;
-use crate::lsp::LspClient;
-use crate::lsp::LspMessage;
-use crate::lsp::TextDocumentItem;
+use crate::buffer::Buffer;
+use crate::input::{EditorCommand, InputHandler};
+use crate::lsp::LspClient::LspClient;
 
 use crate::plugin_manager::PluginManager;
-use crate::types::{Card, CardType, EditorEvent, EditorMode, Location, RenderBuffer, RenderCell, RenderLine, Size};
+use crate::renderer::Renderer;
+use crate::services::lsp_service::LspService;
+use crate::types::{EditorEvent, EditorMode};
 use crate::highlighter::Highlighter;
+use crate::ui::ui_manager::UiManager;
+
 
 pub struct Editor {
     pub mode: EditorMode,
-    pub output: Stdout,
-    pub size: Size,
+
+    pub buffer: Buffer, // TODO: Make multi buffer
+
     pub command: String,
-    
-    pub render_buffer: RenderBuffer,
-    pub text: Vec<String>,
-    pub cards: Vec<Card>, // To be changed.
-    
-    pub location: Location,
-    pub current_path: String,
-    pub scroll_offset: u16,
 
+    pub ui: UiManager,
+    pub renderer: Box<dyn Renderer>,
+    pub input: Box<dyn InputHandler>,
+    pub plugins: PluginManager,
     pub highlighter: Highlighter,
-    pub plugin_manager: PluginManager,
-
-    pub lsp_client: Option<LspClient>
+    pub lsp: Option<LspService>
 }
 
 impl Editor {
-    pub fn new() -> Self {
-        let mut output = stdout();
-        output.execute(terminal::EnterAlternateScreen).expect("Could not enter Alternate Screen.");
-        terminal::enable_raw_mode().expect("Could not enable raw mode.");
-        output.execute(EnableMouseCapture).expect("Could not enable mouse capture.");
+    pub fn new(renderer: Box<dyn Renderer>, input: Box<dyn InputHandler>) -> Self { 
+        let _client = LspClient::spawn();
 
-        let term_size = terminal::size().expect("Size could not be determined.");
-
-        let size = Size { cols: term_size.0, rows: term_size.1 };
-
-        let mut plugin_manager = PluginManager::new();
-        plugin_manager.load_config();
-        plugin_manager.start_watcher().unwrap();
-
-        let highlighter = Highlighter::new(Arc::clone(&plugin_manager.syntax));
-        let client = LspClient::spawn();
+        let mut plugins = PluginManager::new();
+        plugins.load_config();
+        plugins.start_watcher().unwrap();
+        
+        let highlighter = Highlighter::new(
+            Arc::clone(&plugins.syntax)
+        );
 
         Self {
             mode: EditorMode::NORMAL,
-            output,
-            size,
+            buffer: Buffer::new(),
             command: "".to_string(),
-            render_buffer: RenderBuffer { drawn: Vec::new(), current: Vec::new() },
-            text: Vec::new(),
-            cards: Vec::new(),
-            location: Location { col: 6, row: 0 },
-            current_path: "".to_string(),
-            scroll_offset: 0,
+            ui: UiManager::new(),
+            renderer,
+            input,
+            plugins,
             highlighter,
-            plugin_manager,
-            lsp_client: client
+            lsp: None
         }
     }
 
@@ -88,9 +67,8 @@ impl Editor {
             .split("\n")
             .map(|s| s.to_string())
             .collect();
-
-        self.text = lines;
-        self.current_path = path.to_string();
+        
+        self.buffer.set_lines(lines.clone());
         
         let file_type_index = path.to_string().rfind(".");
         if let Some(file_type_index) = file_type_index {
@@ -99,79 +77,56 @@ impl Editor {
             self.highlighter.init(file_type.to_string());
         }
 
-        if let Some(client) = self.lsp_client.as_mut() {
-            let init = LspMessage {
-                jsonrpc: "2.0".into(),
-                id: Some(1),
-                method: "initialize".into(),
-                params: InitializeParams {
-                    capabilities: Some(InitializeClientCapabilities {}),
-                    root_uri: Some("file:///home/inumaki/dev/oxidy".into()),
-                },
-            };
+        Ok(())
+    }
 
-            client.send(init);
-            client.read();
-            
-            let initialized = LspMessage {
-                jsonrpc: "2.0".into(),
-                id: None,
-                method: "initialized".into(),
-                params: InitializedParams {},
-            };
-            client.send(initialized);
-
-            let open = LspMessage {
-                jsonrpc: "2.0".into(),
-                id: None,
-                method: "textDocument/didOpen".into(),
-                params: DidOpenParams {
-                    textDocument: TextDocumentItem {
-                        uri: "file:///home/inumaki/dev/oxidy/src/main.rs".into(),
-                        languageId: "rust".into(),
-                        version: 1,
-                        text: file_string,
-                    },
-                },
-            };
-
-            client.send(open);
-            client.read();
-
-            let syntax = LspMessage {
-                jsonrpc: "2.0".into(),
-                id: Some(4),
-                method: "textDocument/semanticTokens/full".into(),
-                params: SemanticTokenParams {
-                    textDocument: SemanticTokenTextDocumentItem {
-                        uri: "file:///home/inumaki/dev/oxidy/src/main.rs".into(),
-                    },
+    pub fn run(&mut self) -> io::Result<()> {
+        loop {
+            if let Some(cmd) = self.input.poll(&self.mode)? {
+                if self.handle_command(cmd)? == EditorEvent::Exit {
+                    break;
                 }
-            };
+            }
 
-            client.send(syntax);
-
-            self.cards.push(
-                Card { descripiton: client.read(), card_type: CardType::INFO }
-            );
+            self.renderer.begin_frame();
+            self.renderer.draw_buffer(&self.buffer, &mut self.highlighter);
+            self.renderer.end_frame();
         }
 
         Ok(())
     }
 
-    pub fn run(&mut self) -> io::Result<()> {
-        self.render()?;
-        
-        Ok(())
+    fn handle_command(&mut self, cmd: EditorCommand) -> io::Result<EditorEvent> {
+        match cmd {
+            EditorCommand::MoveUp => self.buffer.move_up(),
+            EditorCommand::MoveDown => self.buffer.move_down(),
+            EditorCommand::MoveLeft => self.buffer.move_left(),
+            EditorCommand::MoveRight => self.buffer.move_right(),
+            EditorCommand::InsertChar(c) => self.buffer.insert_char(c),
+            EditorCommand::InsertCommandChar(c) => self.command.push(c),
+            EditorCommand::ChangeMode(mode) => self.mode = mode,
+            EditorCommand::LeaveMode => self.mode = EditorMode::NORMAL,
+            EditorCommand::RunCommand => {
+                match self.command.as_str() {
+                    "q" => return Ok(EditorEvent::Exit),
+                    _ => {}
+                }
+            }
+            EditorCommand::Save => {}, // self.plugins.save_buffer(&self.buffer),
+            EditorCommand::Quit => return Ok(EditorEvent::Exit),
+            _ => {}
+        }
+        Ok(EditorEvent::None)
     }
 
+    /*
     pub fn render(&mut self) -> io::Result<()> {
         loop {
             self.plugin_manager.poll_reload();
 
             let empty_line = RenderLine {
                     cells: vec![
-                        RenderCell { ch: ' ', style: ContentStyle::new().reset() };
+                        RenderCell { ch: " ".to_string(), style: ContentStyle::new().reset() };
                         self.size.cols as usize
                     ]
             };
@@ -216,7 +171,7 @@ impl Editor {
                         }
                     }
                     Event::Mouse(mouse_event) => {
-                        if self.text.is_empty() { continue; }; 
+                        if self.text.is_empty() { continue; };
 
                         match mouse_event.kind {
                             MouseEventKind::ScrollDown => {
@@ -250,7 +205,7 @@ impl Editor {
                             MouseEventKind::Down(button) => {
                                 if button.is_left() {
                                     let new_col = mouse_event.column;
-                                    let new_row = mouse_event.row + self.scroll_offset;
+                                    let new_row = (mouse_event.row + self.scroll_offset) - 1;
 
                                     self.location.col = new_col;
                                     self.location.row = new_row;
@@ -273,21 +228,13 @@ impl Editor {
 
                 for char in command_input.content().chars() {
                     render_line.cells.push(
-                        RenderCell { ch: char, style: command_input.style().clone() }
+                        RenderCell { ch: char.to_string(), style: command_input.style().clone() }
                     );
                 }
                 self.render_buffer.current[self.size.rows as usize - 1] = render_line;
             }
 
             // TEMP
-            if self.cards.is_empty() {
-                self.cards.push(
-                    Card { 
-                        descripiton: "This is a very long error message, that i have manually written out. This probably shows that currently there is no smart line wrapping. I will add that later.".to_string(), 
-                        card_type: CardType::WARNING 
-                    }
-                );
-            }
             self.render_cards()?;
             
             // diff render_buffer 
@@ -321,9 +268,9 @@ impl Editor {
                         self.location.row = self.location.row.clamp(0, self.text.len() as u16 - 1);
                         let checked_row = self.location.row.checked_sub(self.scroll_offset);
                         if let Some(checked_row) = checked_row {
-                            self.output.queue(MoveTo(self.location.col, checked_row))?;
+                            self.output.queue(MoveTo(self.location.col, checked_row + 1))?;
                         } else {
-                            self.output.queue(MoveTo(self.location.col, 0))?;
+                            self.output.queue(MoveTo(self.location.col, 1))?;
                         }
                     } else {
                         self.output.queue(MoveTo(6, 0))?;
@@ -342,23 +289,25 @@ impl Editor {
     
     pub fn redraw_line(&self, output: &mut StdoutLock, render_line: &RenderLine) {
         let mut current_style: Option<ContentStyle> = None;
-        let mut col = 0;
-        while col <= self.size.cols - 1 {// render_line.cells.clone() {
-            if let Some(cell) = render_line.cells.get(col as usize) {
-                if current_style == None || cell.style != current_style.unwrap() {
-                    let _ = queue!(output, SetStyle(cell.style));
-                    current_style = Some(cell.style);
-                }
-                let _ = write!(output, "{}", cell.ch);
+        let mut col: u16 = 0;
 
-                col += UnicodeWidthChar::width(cell.ch).unwrap_or(1) as u16;
-                continue;
+        for cell in &render_line.cells {
+            if current_style != Some(cell.style) {
+                let _ = queue!(output, SetStyle(cell.style));
+                current_style = Some(cell.style);
             }
-            let _ = queue!(output, ResetColor);
+
+            let _ = write!(output, "{}", cell.ch);
+
+            col += cell.ch.width() as u16;
+        }
+
+        while col < self.size.cols {
             let _ = write!(output, " ");
-            
             col += 1;
         }
+
+        let _ = queue!(output, ResetColor);
     }
 
     pub fn move_cursor_down(&mut self) {
@@ -366,11 +315,8 @@ impl Editor {
             self.location.row += 1;
         }
         self.location.row = self.location.row.clamp(0, self.text.len() as u16 - 1);
-        
-        let mut command_offset: u16 = 1;
-        if self.mode == EditorMode::COMMAND { command_offset = 2; }
-
-        if self.location.row >= self.size.rows - command_offset + self.scroll_offset {
+                
+        if self.location.row >= self.size.rows + self.scroll_offset {
             self.scroll_offset += 1;
         }
         self.scroll_offset = self.scroll_offset.clamp(0, self.text.len() as u16 - 1);
@@ -521,21 +467,18 @@ impl Editor {
     }
 
     pub fn textfield(&mut self) -> io::Result<()> {
-        let mut command_offset: u16 = 1;
-        if self.mode == EditorMode::COMMAND { command_offset = 2; }
-
-        for row in 0..(self.size.rows - command_offset) {
+        for row in 0..(self.size.rows - 1) {
             let line = self.text.get(row as usize + self.scroll_offset as usize);
             let mut current_render_line = RenderLine { 
                 cells: vec![
-                    RenderCell { ch: ' ', style: ContentStyle::new().reset() };
+                    RenderCell { ch: " ".to_string(), style: ContentStyle::new().reset() };
                     self.size.cols as usize
                 ]
             };
             if line.is_none() {
                 let empty = "    ∼ ".to_string().on(Color::Reset).dark_grey();
                 for (index, char) in empty.content().chars().enumerate() {
-                    current_render_line.cells[index] = RenderCell { ch: char, style: empty.style().clone() };
+                    current_render_line.cells[index] = RenderCell { ch: char.to_string(), style: empty.style().clone() };
                 }
                 self.render_buffer.current[row as usize] = current_render_line;
                 continue;
@@ -568,30 +511,52 @@ impl Editor {
             let style = line_number.style();
             let mut current_render_line = RenderLine { 
                 cells: vec![
-                    RenderCell { ch: ' ', style: ContentStyle::new().reset() };
+                    RenderCell { ch: " ".to_string(), style: ContentStyle::new().reset() };
                     self.size.cols as usize
                 ]
 
             };
-            for (index, char) in content.chars().enumerate() {
-                current_render_line.cells[index] = RenderCell { ch: char, style: style.clone() };
+            let mut col = 0;
+            for g in content.graphemes(true) {
+                let width = UnicodeWidthStr::width(g) as usize;
+                if col + width > self.size.cols as usize { break; }
+
+                current_render_line.cells[col] = RenderCell { ch: g.to_string(), style: style.clone() };
+
+                // fill any extra columns with blank placeholders to preserve spacing
+                for i in 1..width {
+                    if col + i < self.size.cols as usize {
+                        current_render_line.cells[col + i] = RenderCell { ch: " ".to_string(), style: style.clone() };
+                    }
+                }
+
+                col += width;
             }
 
-            let styled_line = self.highlighter.highlight(line.unwrap());
+            let styled_line = self.highlighter.highlight(line.unwrap(), row as usize + self.scroll_offset as usize);
             for token in styled_line {
-                let mut x = 6 + token.offset;
-                for char in token.text.chars() {
-                    let text_style = ContentStyle::new()
+                let mut col = 6 + token.offset; // still okay if offset is character-based
+                for g in token.text.graphemes(true) {
+                    let width = UnicodeWidthStr::width(g) as usize;
+                    if col >= self.size.cols as usize { break; }
+
+                    let style = ContentStyle::new()
                         .on(Color::Reset)
-                        .with(token.style.unwrap_or(Color::White));
-                    if x < self.size.cols as usize {
-                        current_render_line.cells[x] = RenderCell { ch: char, style: text_style };
-                        x += (UnicodeWidthChar::width(char).unwrap_or(1));
+                        .with(token.style.unwrap_or(Color::Rgb { r: 230, g: 225, b: 233 }));
+
+                    current_render_line.cells[col] = RenderCell { ch: g.to_string(), style: style.clone() };
+
+                    for i in 1..width {
+                        if col + i < self.size.cols as usize {
+                            current_render_line.cells[col + i] = RenderCell { ch: " ".to_string(), style: style.clone() };
+                        }
                     }
+
+                    col += width;
                 }
             }
 
-            self.render_buffer.current[row as usize] = current_render_line;
+            self.render_buffer.current[row as usize + 1] = current_render_line;
         }
 
         Ok(())
@@ -599,20 +564,19 @@ impl Editor {
 
     pub fn status_bar(&mut self) -> io::Result<()> {
         let mut render_line = RenderLine { cells: Vec::new() };
-        let mut command_offset = 1;
-        if self.mode == EditorMode::COMMAND { command_offset = 2; }
-
 
         // TODO: Add file path
-        let left_bar = format!(" Oxidy ").bold().black().on_white();
-        let right_symbol = "".to_string().reset().white();
-        let left_symbol = "".to_string().reset().white();
+        let bg = Color::Rgb { r: 32, g: 31, b: 37 };
+        let fg = Color::Rgb { r: 230, g: 225, b: 233 };
+        let left_bar = format!(" Oxidy ").bold().on(bg.clone()).with(fg.clone());
+        let right_symbol = "".to_string().on(Color::Reset).with(bg.clone());
+        let left_symbol = "".to_string().on(Color::Reset).with(bg.clone());
 
         let mut file_name = " empty ".to_string();
         if let Some(file_name_index) = self.current_path.rfind("/") {
             file_name = format!(" {} ", self.current_path[file_name_index + 1..].to_string());
         }
-        let file_name_bar = file_name.black().on_white();
+        let file_name_bar = file_name.black().on(bg.clone()).with(fg.clone());
 
         let mode_text: &str;
         match self.mode {
@@ -621,7 +585,7 @@ impl Editor {
             EditorMode::COMMAND => mode_text = "CMD "
         }
 
-        let right_bar = format!(" {:02}:{:02} {}", self.location.col - 5, self.location.row + 1, mode_text).black().on_white();
+        let right_bar = format!(" {:02}:{:02} {}", self.location.col - 5, self.location.row + 1, mode_text).on(bg.clone()).with(fg.clone());
         
         let spacing = " ".to_string().reset();
 
@@ -640,12 +604,12 @@ impl Editor {
         for item in status_bar {
             for char in item.content().chars() {
                 render_line.cells.push(
-                    RenderCell { ch: char, style: item.style().clone() }
+                    RenderCell { ch: char.to_string(), style: item.style().clone() }
                 );
             }
         }
         
-        self.render_buffer.current[self.size.rows as usize - command_offset] = render_line;
+        self.render_buffer.current[0] = render_line;
         
         Ok(())
     }
@@ -677,11 +641,9 @@ impl Editor {
         let height = (lines.len() + 2).clamp(3, max_height);
         let offset = self.size.cols as usize - width - 1;
         let style = card.card_type.style();
-        let mut command_offset = 1;
-        if self.mode == EditorMode::COMMAND { command_offset = 2 }
 
         for y in 0..height {
-            let mut render_line = self.render_buffer.current[self.size.rows as usize - command_offset - (height - y)].clone();            
+            let mut render_line = self.render_buffer.current[self.size.rows as usize - (height - y)].clone();            
             let mut char: char;
             for x in 0..width {
                 if y == 0 {
@@ -710,10 +672,10 @@ impl Editor {
                         char = chars.nth(x - 1 - padding).unwrap_or(' ');
                     }
                 }
-                render_line.cells[x + offset] = RenderCell { ch: char, style: style };
+                render_line.cells[x + offset] = RenderCell { ch: char.to_string(), style: style };
 
             }
-            self.render_buffer.current[self.size.rows as usize - command_offset - (height - y)] = render_line
+            self.render_buffer.current[self.size.rows as usize - (height - y)] = render_line
         }
 
         Ok(())
@@ -725,11 +687,7 @@ impl Editor {
         self.output.execute(Show).expect("Could not show cursor.");
         self.output.execute(DisableMouseCapture).expect("Could not disable mouse capture.");
     }
+    */
 }
 
 
-impl Drop for Editor {
-    fn drop(&mut self) {
-        self.cleanup();
-    }
-}

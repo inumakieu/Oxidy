@@ -8,12 +8,22 @@ pub mod highlighter;
 pub mod editor;
 pub mod plugin_manager;
 pub mod lsp;
+pub mod buffer;
+pub mod renderer;
+pub mod input;
+pub mod services;
+pub mod ui;
 
 use crossterm::cursor;
 use crossterm::terminal;
 use crossterm::terminal::EndSynchronizedUpdate;
 use crossterm::ExecutableCommand;
 use editor::Editor;
+
+use crate::input::CrosstermInput;
+use crate::plugin_manager::PluginManager;
+use crate::renderer::crossterm::CrossTermRenderer;
+use crate::types::Size;
 
 
 fn main() -> io::Result<()> {
@@ -40,7 +50,7 @@ fn main() -> io::Result<()> {
             .map(|loc| format!("{}:{}", loc.file(), loc.line()))
             .unwrap_or_else(|| "unknown location".into());
 
-        eprintln!("\n\n🛑 Oxidy crashed!\n");
+        eprintln!("\n\nOxidy crashed!\n");
         eprintln!("Reason: {msg}");
         eprintln!("At: {location}");
 
@@ -50,7 +60,16 @@ fn main() -> io::Result<()> {
         }
     }));
 
-    let mut editor = Editor::new();
+
+    let term_size = terminal::size().expect("Size could not be determined.");
+    let size = Size { cols: term_size.0, rows: term_size.1 };
+    let renderer = CrossTermRenderer::new(size);
+    let input = CrosstermInput::new(); 
+    
+    let mut editor = Editor::new(
+        Box::new(renderer),
+        Box::new(input),
+    );
     
     if let Some(input_file) = args.next() {
         editor.load_file(&input_file)?;
