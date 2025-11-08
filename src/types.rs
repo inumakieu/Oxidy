@@ -3,6 +3,7 @@ use std::fs::File;
 use std::io::{Write, Result};
 use std::path::Path;
 
+#[derive(Debug, Clone)]
 pub struct Size {
     pub cols: u16,
     pub rows: u16

@@ -11,8 +11,9 @@ use crate::lsp::LspClient::LspClient;
 use crate::plugin_manager::PluginManager;
 use crate::renderer::Renderer;
 use crate::services::lsp_service::LspService;
-use crate::types::{EditorEvent, EditorMode};
+use crate::types::{EditorEvent, EditorMode, Size};
 use crate::highlighter::Highlighter;
+use crate::ui::status_bar::StatusBar;
 use crate::ui::ui_manager::UiManager;
 
 
@@ -32,9 +33,7 @@ pub struct Editor {
 }
 
 impl Editor {
-    pub fn new(renderer: Box<dyn Renderer>, input: Box<dyn InputHandler>) -> Self { 
-        let _client = LspClient::spawn();
-
+    pub fn new(size: Size, renderer: Box<dyn Renderer>, input: Box<dyn InputHandler>) -> Self { 
         let mut plugins = PluginManager::new();
         plugins.load_config();
         plugins.start_watcher().unwrap();
@@ -43,16 +42,22 @@ impl Editor {
             Arc::clone(&plugins.syntax)
         );
 
+        let mut ui = UiManager::new();
+        let status_bar = StatusBar::new();
+        ui.add(status_bar);
+
+        let lsp = LspService::new();
+
         Self {
             mode: EditorMode::NORMAL,
-            buffer: Buffer::new(),
+            buffer: Buffer::new(size),
             command: "".to_string(),
-            ui: UiManager::new(),
+            ui,
             renderer,
             input,
             plugins,
             highlighter,
-            lsp: None
+            lsp
         }
     }
 
@@ -68,19 +73,21 @@ impl Editor {
             .map(|s| s.to_string())
             .collect();
         
-        self.buffer.set_lines(lines.clone());
+        self.buffer.set(lines.clone(), path.to_string());
         
         let file_type_index = path.to_string().rfind(".");
         if let Some(file_type_index) = file_type_index {
             let file_type = &path[file_type_index + 1..];
 
             self.highlighter.init(file_type.to_string());
-        }
+        } 
+
 
         Ok(())
     }
 
     pub fn run(&mut self) -> io::Result<()> {
+        
         loop {
             if let Some(cmd) = self.input.poll(&self.mode)? {
                 if self.handle_command(cmd)? == EditorEvent::Exit {
@@ -89,7 +96,7 @@ impl Editor {
             }
 
             self.renderer.begin_frame();
-            self.renderer.draw_buffer(&self.buffer, &mut self.highlighter);
+            self.renderer.draw_buffer(&self.buffer, &self.ui, &mut self.highlighter);
             self.renderer.end_frame();
         }
 
@@ -109,6 +116,18 @@ impl Editor {
             EditorCommand::RunCommand => {
                 match self.command.as_str() {
                     "q" => return Ok(EditorEvent::Exit),
+                    "lsp" => {
+                        let buff_clone = self.buffer.clone();
+                        if let Some(root_index) = buff_clone.path.rfind("/") {
+                            let root_uri = &buff_clone.path[0..root_index];
+                            self.with_lsp(|lsp| {
+                                lsp.initialize(root_uri);
+                            });
+                        } 
+                        self.with_lsp(|lsp| {
+                            lsp.request_semantic_tokens(&buff_clone);
+                        });
+                    }, // TODO: Make it spawn lsp specified
                     _ => {}
                 }
             }
@@ -117,6 +136,15 @@ impl Editor {
             _ => {}
         }
         Ok(EditorEvent::None)
+    }
+
+    fn with_lsp<F>(&mut self, f: F)
+    where
+        F: FnOnce(&mut LspService)
+    {
+        if let Some(lsp) = self.lsp.as_mut() {
+            f(lsp);
+        }
     }
 
     /*

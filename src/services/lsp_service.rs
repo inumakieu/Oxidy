@@ -1,7 +1,14 @@
 use std::collections::HashMap;
+use std::{
+    sync::mpsc::{self, Sender, Receiver},
+    thread,
+};
+use std::process::Command;
+use std::{io::{BufRead, BufReader, Read, Write}, process::{Child, ChildStdin, ChildStdout, Stdio}};
 
 use crossterm::style::Color;
 
+use crate::buffer::Buffer;
 use crate::{
     lsp::{
         LspClient::LspClient, 
@@ -12,11 +19,125 @@ use crate::{
 };
 
 pub struct LspService {
-    client: LspClient,
+    sender: Sender<LspMessage<serde_json::Value>>,
+    receiver: Receiver<LspResponse<serde_json::Value>>,
+    process: Child,
     data: Option<LspResponseResult>
 }
 
 impl LspService {
+    pub fn new() -> Option<Self> {
+        let mut process = Command::new("rust-analyzer")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::inherit())
+            .spawn()
+            .expect("failed to start rust-analyzer");
+
+        let stdin = process.stdin.take().unwrap();
+        let stdout = process.stdout.take().unwrap();
+
+        let (tx_to_writer, rx_from_main): (Sender<LspMessage<serde_json::Value>>, Receiver<LspMessage<serde_json::Value>>) = mpsc::channel();
+        let (tx_to_main, rx_from_reader): (Sender<LspResponse<serde_json::Value>>, Receiver<LspResponse<serde_json::Value>>) = mpsc::channel();
+
+        // 🧵 Writer thread – owns stdin
+        thread::spawn(move || {
+            let mut writer = stdin;
+            while let Ok(msg) = rx_from_main.recv() {
+                if let Ok(json) = serde_json::to_string(&msg) {
+                    let header = format!("Content-Length: {}\r\n\r\n", json.len());
+                    let _ = writer.write_all(header.as_bytes());
+                    let _ = writer.write_all(json.as_bytes());
+                    let _ = writer.flush();
+                }
+            }
+        });
+
+        // 🧵 Reader thread – owns stdout
+        thread::spawn(move || {
+            let mut reader = BufReader::new(stdout);
+            loop {
+                // Read Content-Length header
+                let mut header = String::new();
+                if reader.read_line(&mut header).ok().is_none() {
+                    break;
+                }
+                if !header.starts_with("Content-Length") {
+                    continue;
+                }
+                let content_len = header
+                    .split(':')
+                    .nth(1)
+                    .and_then(|v| v.trim().parse::<usize>().ok())
+                    .unwrap_or(0);
+
+                // Skip the CRLF line
+                let mut discard = String::new();
+                let _ = reader.read_line(&mut discard);
+
+                // Read body
+                let mut buf = vec![0u8; content_len];
+                if reader.read_exact(&mut buf).is_err() {
+                    break;
+                }
+
+                if let Ok(text) = String::from_utf8(buf) {
+                    if let Ok(resp) = serde_json::from_str::<LspResponse<serde_json::Value>>(&text) {
+                        let _ = tx_to_main.send(resp);
+                    } else {
+                        // eprintln!("⚠️ Failed to parse LSP response: {}", text);
+                    }
+                }
+            }
+        });
+
+        Some(
+            Self {
+                sender: tx_to_writer,
+                receiver: rx_from_reader,
+                process,
+                data: None
+            }
+        )
+    }
+
+    pub fn send<T: serde::Serialize>(&self, msg: LspMessage<T>) {
+        let params_json = serde_json::to_value(msg.params).unwrap();
+
+        let msg_value = LspMessage::<serde_json::Value> {
+            jsonrpc: msg.jsonrpc,
+            id: msg.id,
+            method: msg.method,
+            params: params_json,
+        };
+
+        let _ = self.sender.send(msg_value);    
+    }
+
+    pub fn read<T>(&self) -> Option<LspResponse<T>>
+    where
+        T: for<'de> serde::Deserialize<'de>,
+    {
+        match self.receiver.recv().ok() {
+            Some(resp_generic) => {
+                // Convert the inner generic Value into your concrete type
+                let result_typed: Result<T, _> = serde_json::from_value(resp_generic.result);
+                match result_typed {
+                    Ok(result) => Some(LspResponse {
+                        jsonrpc: resp_generic.jsonrpc,
+                        id: resp_generic.id,
+                        result,
+                    }),
+                    Err(e) => {
+                        eprintln!("⚠️ Failed to parse LSP response payload: {}", e);
+                        None
+                    }
+                }
+            }
+            None => None,
+        }
+    }
+
     pub fn initialize(&mut self, root_uri: &str) {
         let init = LspMessage {
             jsonrpc: "2.0".into(),
@@ -28,8 +149,8 @@ impl LspService {
             },
         };
 
-        self.client.send(init);
-        let response_result: LspResponse<LspResponseResult> = self.client.read().unwrap();
+        self.send(init);
+        let response_result: LspResponse<LspResponseResult> = self.read().unwrap();
         self.data = Some(response_result.result);
 
         let initialized = LspMessage {
@@ -38,7 +159,7 @@ impl LspService {
             method: "initialized".into(),
             params: InitializedParams {},
         };
-        self.client.send(initialized);
+        self.send(initialized);
     }
 
     pub fn open_file(&mut self, uri: &str, contents: &str) {
@@ -61,13 +182,13 @@ impl LspService {
             },
         };
 
-        self.client.send(open);
-        let _: Option<LspResponse<LspDidOpenResponseResult>> = self.client.read();
+        self.send(open);
+        let _: Option<LspResponse<LspDidOpenResponseResult>> = self.read();
     }
     
-    pub fn request_semantic_tokens(&mut self, uri: &str, lines: Vec<String>) -> Vec<Vec<Token>> {
+    pub fn request_semantic_tokens(&mut self, buffer: &Buffer) -> Vec<Vec<Token>> {
         let mut absolute_path: String = "".to_string();
-        match std::fs::canonicalize(uri) {
+        match std::fs::canonicalize(buffer.path.clone()) {
             Ok(absolute) => absolute_path = absolute.to_string_lossy().to_string(),
             Err(e) => eprintln!("Error: {}", e),
         }
@@ -83,15 +204,15 @@ impl LspService {
             }
         };
 
-        self.client.send(syntax);
-        let response: LspResponse<LspSemanticResponseResult> = self.client.read().unwrap();
+        self.send(syntax);
+        let response: LspResponse<LspSemanticResponseResult> = self.read().unwrap();
 
         let mut current_data: [i32; 5];
         let mut index = 0;
         let mut previousDeltaStart = 0;
         let mut previousDeltaLine = 0;
 
-        let mut tokens: Vec<Vec<Token>> = vec![Vec::new(); lines.len()];
+        let mut tokens: Vec<Vec<Token>> = vec![Vec::new(); buffer.lines.len()];
         let mut currTokens: Vec<Token> = Vec::new();
 
         let mut colors: HashMap<String, Color> = HashMap::new();
@@ -135,9 +256,9 @@ impl LspService {
 
             let lineIndex = previousDeltaLine + deltaLine;
             let charStartIndex = previousDeltaStart + deltaStart;
-            let line = &lines[lineIndex as usize];
-            let start_byte = utf16_to_byte_index(line, charStartIndex as usize);
-            let end_byte = utf16_to_byte_index(line, (charStartIndex + length) as usize);
+            let line = buffer.lines[lineIndex as usize].clone();
+            let start_byte = utf16_to_byte_index(line.as_str(), charStartIndex as usize);
+            let end_byte = utf16_to_byte_index(line.as_str(), (charStartIndex + length) as usize);
             let token_slice = &line[start_byte..end_byte]; 
             
             if let Some(data) = &self.data {
@@ -170,4 +291,10 @@ fn utf16_to_byte_index(s: &str, utf16_index: usize) -> usize {
         count += ch.len_utf16();
     }
     s.len()
+}
+
+impl Drop for LspService {
+    fn drop(&mut self) {
+        let _ = self.process.kill();
+    }
 }

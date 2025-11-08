@@ -63,10 +63,11 @@ fn main() -> io::Result<()> {
 
     let term_size = terminal::size().expect("Size could not be determined.");
     let size = Size { cols: term_size.0, rows: term_size.1 };
-    let renderer = CrossTermRenderer::new(size);
+    let renderer = CrossTermRenderer::new(size.clone());
     let input = CrosstermInput::new(); 
     
     let mut editor = Editor::new(
+        size,
         Box::new(renderer),
         Box::new(input),
     );

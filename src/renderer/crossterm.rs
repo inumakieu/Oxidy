@@ -12,6 +12,7 @@ use crate::highlighter::Highlighter;
 use crate::renderer::Renderer;
 use crate::buffer::Buffer;
 use crate::types::{RenderBuffer, RenderCell, RenderLine, Size};
+use crate::ui::ui_manager::UiManager;
 pub struct CrossTermRenderer {
     pub size: Size,
     pub render_buffer: RenderBuffer,
@@ -161,7 +162,7 @@ impl Renderer for CrossTermRenderer {
         self.output.queue(cursor::Hide).expect("Could not hide cursor.");
     }
 
-    fn draw_buffer(&mut self, buffer: &Buffer, highlighter: &mut Highlighter) {
+    fn draw_buffer(&mut self, buffer: &Buffer, ui: &UiManager, highlighter: &mut Highlighter) {
         let mut output = self.output.lock();
         queue!(output, MoveTo(0, 0)).expect("Could not move cursor to 0, 0.");
 
@@ -174,6 +175,8 @@ impl Renderer for CrossTermRenderer {
         self.render_buffer.current = vec![empty_line; self.size.rows as usize];
 
         let _ = self.textfield(buffer, highlighter);
+
+        ui.render(&mut self.render_buffer.current);
 
         if self.render_buffer.current.len() == 0 {
             return;
@@ -197,6 +200,13 @@ impl Renderer for CrossTermRenderer {
         }
         // current -> drawn
         self.render_buffer.drawn = self.render_buffer.current.clone();
+        
+        let checked_row = buffer.checked_row();
+        if let Some(checked_row) = checked_row {
+            let _ = self.output.queue(MoveTo(6 + buffer.cursor.col as u16, checked_row as u16 + 1));
+        } else {
+            let _ = self.output.queue(MoveTo(6 + buffer.cursor.col as u16, 1));
+        }   
     } 
 
     fn end_frame(&mut self) {
