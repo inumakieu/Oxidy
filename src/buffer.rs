@@ -25,6 +25,10 @@ impl Buffer {
             path: "".to_string()
         }
     }
+
+    pub fn text(&self) -> String {
+        return self.lines.join("\n");
+    }
     
     pub fn set(&mut self, lines: Vec<String>, path: String) {
         self.lines = lines;

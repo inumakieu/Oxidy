@@ -3,6 +3,7 @@
 use std::io::{self, Read};
 use std::sync::Arc;
 use std::fs::File;
+use std::thread;
 
 use crate::buffer::Buffer;
 use crate::input::{EditorCommand, InputHandler};
@@ -10,8 +11,8 @@ use crate::lsp::LspClient::LspClient;
 
 use crate::plugin_manager::PluginManager;
 use crate::renderer::Renderer;
-use crate::services::lsp_service::LspService;
-use crate::types::{EditorEvent, EditorMode, Size};
+use crate::services::lsp_service::{LspService, LspServiceEvent};
+use crate::types::{EditorEvent, EditorMode, Size, Token};
 use crate::highlighter::Highlighter;
 use crate::ui::status_bar::StatusBar;
 use crate::ui::ui_manager::UiManager;
@@ -82,13 +83,27 @@ impl Editor {
             self.highlighter.init(file_type.to_string());
         } 
 
-
         Ok(())
     }
 
     pub fn run(&mut self) -> io::Result<()> {
         
         loop {
+            if let Some(lsp) = self.lsp.as_mut() {
+                match lsp.poll() {
+                    LspServiceEvent::Initialized => {
+                        let buffer_clone = self.buffer.clone();
+                        lsp.open_file(&buffer_clone.path, &buffer_clone.text());
+                    }
+                    LspServiceEvent::OpenedFile => {
+                        lsp.request_semantic_tokens(&self.buffer);
+                    }
+                    LspServiceEvent::ReceivedSemantics { semantics } => {
+                        self.highlighter.tokens = lsp.set_tokens(&self.buffer);
+                    }
+                    _ => {}
+                }
+            }
             if let Some(cmd) = self.input.poll(&self.mode)? {
                 if self.handle_command(cmd)? == EditorEvent::Exit {
                     break;
@@ -117,15 +132,11 @@ impl Editor {
                 match self.command.as_str() {
                     "q" => return Ok(EditorEvent::Exit),
                     "lsp" => {
-                        let buff_clone = self.buffer.clone();
-                        if let Some(root_index) = buff_clone.path.rfind("/") {
-                            let root_uri = &buff_clone.path[0..root_index];
-                            self.with_lsp(|lsp| {
-                                lsp.initialize(root_uri);
-                            });
-                        } 
+                        let buffer_clone = self.buffer.clone();
+                        let root_index = buffer_clone.path.rfind("/").unwrap();
+                        let root_uri = &buffer_clone.path[0..root_index];
                         self.with_lsp(|lsp| {
-                            lsp.request_semantic_tokens(&buff_clone);
+                            lsp.initialize(&root_uri);
                         });
                     }, // TODO: Make it spawn lsp specified
                     _ => {}

@@ -10,6 +10,17 @@ pub struct LspResponse<T> {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+pub struct LspDiagnostics {
+    pub jsonrpc: String,
+    pub method: String,
+    pub params: LspDiagnosticParams
+}
+
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct LspDiagnosticParams {}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct LspSemanticResponseResult {
     pub resultId: String,
     pub data: Vec<i32>

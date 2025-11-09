@@ -7,8 +7,10 @@ use std::process::Command;
 use std::{io::{BufRead, BufReader, Read, Write}, process::{Child, ChildStdin, ChildStdout, Stdio}};
 
 use crossterm::style::Color;
+use serde_json::Value;
 
 use crate::buffer::Buffer;
+use crate::lsp::LspResponse::LspDiagnostics;
 use crate::{
     lsp::{
         LspClient::LspClient, 
@@ -18,11 +20,31 @@ use crate::{
     types::Token
 };
 
+pub enum LspServiceEvent {
+    Initialized,
+    OpenedFile,
+    ReceivedSemantics { semantics: LspSemanticResponseResult },
+    None
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LspState {
+    Uninitialized,
+    Initializing,
+    Initialized,
+    OpeningFile,
+    FileOpened,
+    RequestingSemantics,
+    SemanticsReceived,
+}
+
 pub struct LspService {
     sender: Sender<LspMessage<serde_json::Value>>,
     receiver: Receiver<LspResponse<serde_json::Value>>,
     process: Child,
-    data: Option<LspResponseResult>
+    data: Option<LspResponseResult>,
+    semantics: Option<LspSemanticResponseResult>,
+    state: LspState,
 }
 
 impl LspService {
@@ -40,7 +62,7 @@ impl LspService {
         let (tx_to_writer, rx_from_main): (Sender<LspMessage<serde_json::Value>>, Receiver<LspMessage<serde_json::Value>>) = mpsc::channel();
         let (tx_to_main, rx_from_reader): (Sender<LspResponse<serde_json::Value>>, Receiver<LspResponse<serde_json::Value>>) = mpsc::channel();
 
-        // 🧵 Writer thread – owns stdin
+        
         thread::spawn(move || {
             let mut writer = stdin;
             while let Ok(msg) = rx_from_main.recv() {
@@ -53,7 +75,7 @@ impl LspService {
             }
         });
 
-        // 🧵 Reader thread – owns stdout
+        
         thread::spawn(move || {
             let mut reader = BufReader::new(stdout);
             loop {
@@ -84,8 +106,10 @@ impl LspService {
                 if let Ok(text) = String::from_utf8(buf) {
                     if let Ok(resp) = serde_json::from_str::<LspResponse<serde_json::Value>>(&text) {
                         let _ = tx_to_main.send(resp);
+                    } else if let Ok(resp) = serde_json::from_str::<LspDiagnostics>(&text) {
+                        // TODO: Show diagnostics
                     } else {
-                        // eprintln!("⚠️ Failed to parse LSP response: {}", text);
+                        eprintln!("⚠️ Failed to parse LSP response: {}", text);
                     }
                 }
             }
@@ -96,7 +120,9 @@ impl LspService {
                 sender: tx_to_writer,
                 receiver: rx_from_reader,
                 process,
-                data: None
+                data: None,
+                semantics: None,
+                state: LspState::Uninitialized
             }
         )
     }
@@ -114,31 +140,70 @@ impl LspService {
         let _ = self.sender.send(msg_value);    
     }
 
-    pub fn read<T>(&self) -> Option<LspResponse<T>>
+    pub fn poll(&mut self) -> LspServiceEvent {
+        // Try to read any incoming message
+        if let Ok(resp_value) = self.receiver.try_recv() {
+            match self.state {
+                LspState::Initializing => {
+                    if let Some(init_resp) = self.convert_response::<LspResponseResult>(resp_value) {
+                        self.data = Some(init_resp.result);
+
+                        let initialized = LspMessage {
+                            jsonrpc: "2.0".into(),
+                            id: None,
+                            method: "initialized".into(),
+                            params: InitializedParams {},
+                        };
+                        self.send(initialized);
+                        self.state = LspState::Initialized;
+                        return LspServiceEvent::Initialized;
+                    }
+                }
+
+                LspState::RequestingSemantics => {
+                    if let Some(resp) = self.convert_response::<LspSemanticResponseResult>(resp_value) {
+                        self.semantics = Some(resp.result);
+                        self.state = LspState::SemanticsReceived;
+                        return LspServiceEvent::ReceivedSemantics {
+                            semantics: self.semantics.clone().unwrap(),
+                        };
+                    }
+                }
+
+                _ => { /* ignore notifications, etc. */ }
+            }
+        }
+
+        if self.state == LspState::OpeningFile {
+            self.state = LspState::FileOpened;
+            return LspServiceEvent::OpenedFile;
+        }
+
+        LspServiceEvent::None
+    }
+
+
+    fn convert_response<T>(&self, value: LspResponse<Value>) -> Option<LspResponse<T>>
     where
         T: for<'de> serde::Deserialize<'de>,
     {
-        match self.receiver.recv().ok() {
-            Some(resp_generic) => {
-                // Convert the inner generic Value into your concrete type
-                let result_typed: Result<T, _> = serde_json::from_value(resp_generic.result);
-                match result_typed {
-                    Ok(result) => Some(LspResponse {
-                        jsonrpc: resp_generic.jsonrpc,
-                        id: resp_generic.id,
-                        result,
-                    }),
-                    Err(e) => {
-                        eprintln!("⚠️ Failed to parse LSP response payload: {}", e);
-                        None
-                    }
-                }
+        let result_typed: Result<T, _> = serde_json::from_value(value.result);
+        match result_typed {
+            Ok(result) => Some(LspResponse {
+                jsonrpc: value.jsonrpc,
+                id: value.id,
+                result,
+            }),
+            Err(e) => {
+                eprintln!("⚠️ Failed to parse LSP response payload: {}", e);
+                None
             }
-            None => None,
         }
     }
 
     pub fn initialize(&mut self, root_uri: &str) {
+        if self.state != LspState::Uninitialized { return; }
+
         let init = LspMessage {
             jsonrpc: "2.0".into(),
             id: Some(1),
@@ -150,31 +215,24 @@ impl LspService {
         };
 
         self.send(init);
-        let response_result: LspResponse<LspResponseResult> = self.read().unwrap();
-        self.data = Some(response_result.result);
-
-        let initialized = LspMessage {
-            jsonrpc: "2.0".into(),
-            id: None,
-            method: "initialized".into(),
-            params: InitializedParams {},
-        };
-        self.send(initialized);
+        self.state = LspState::Initializing;
     }
 
     pub fn open_file(&mut self, uri: &str, contents: &str) {
-        let mut absolute_path: String = "".to_string();
-        match std::fs::canonicalize(uri) {
-            Ok(absolute) => absolute_path = absolute.to_string_lossy().to_string(),
-            Err(e) => eprintln!("Error: {}", e),
-        }
+        if self.state != LspState::Initialized { return; }
+
+        let abs = std::fs::canonicalize(uri)
+            .ok()
+            .and_then(|p| Some(format!("file://{}", p.to_string_lossy())))
+            .unwrap_or(uri.to_string());
+
         let open = LspMessage {
             jsonrpc: "2.0".into(),
             id: None,
             method: "textDocument/didOpen".into(),
             params: DidOpenParams {
                 textDocument: TextDocumentItem {
-                    uri: format!("file://{}", absolute_path).into(),
+                    uri: abs,
                     languageId: "rust".into(),
                     version: 1,
                     text: contents.to_string(),
@@ -183,30 +241,32 @@ impl LspService {
         };
 
         self.send(open);
-        let _: Option<LspResponse<LspDidOpenResponseResult>> = self.read();
+        self.state = LspState::OpeningFile;
     }
-    
-    pub fn request_semantic_tokens(&mut self, buffer: &Buffer) -> Vec<Vec<Token>> {
-        let mut absolute_path: String = "".to_string();
-        match std::fs::canonicalize(buffer.path.clone()) {
-            Ok(absolute) => absolute_path = absolute.to_string_lossy().to_string(),
-            Err(e) => eprintln!("Error: {}", e),
-        }
+
+    pub fn request_semantic_tokens(&mut self, buffer: &Buffer) {
+        if self.state != LspState::FileOpened { return; }
+
+        let abs = std::fs::canonicalize(&buffer.path)
+            .ok()
+            .and_then(|p| Some(format!("file://{}", p.to_string_lossy())))
+            .unwrap_or(buffer.path.clone());
 
         let syntax = LspMessage {
             jsonrpc: "2.0".into(),
             id: Some(4),
             method: "textDocument/semanticTokens/full".into(),
             params: SemanticTokenParams {
-                textDocument: SemanticTokenTextDocumentItem {
-                    uri: format!("file://{}", absolute_path).into(),
-                },
-            }
+                textDocument: SemanticTokenTextDocumentItem { uri: abs },
+            },
         };
 
         self.send(syntax);
-        let response: LspResponse<LspSemanticResponseResult> = self.read().unwrap();
+        self.state = LspState::RequestingSemantics;
+    }
 
+
+    pub fn set_tokens(&self, buffer: &Buffer) -> Vec<Vec<Token>> {
         let mut current_data: [i32; 5];
         let mut index = 0;
         let mut previousDeltaStart = 0;
@@ -239,43 +299,45 @@ impl LspService {
         colors.insert("regexp".into(), Color::Magenta);
         colors.insert("operator".into(), Color::DarkMagenta);
 
-        while index + 4 < response.result.data.len() {
-            current_data = response.result.data[index..index + 5].try_into().unwrap();
-            
-            let deltaLine = current_data[0];
-            let deltaStart = current_data[1];
-            let length = current_data[2];
-            let tokenIndex = current_data[3];
-            let tokenModifier = current_data[4];
-
-            if deltaLine != 0 {
-                previousDeltaStart = 0;
-                tokens.insert(previousDeltaLine as usize, currTokens);
-                currTokens = Vec::new();
-            }
-
-            let lineIndex = previousDeltaLine + deltaLine;
-            let charStartIndex = previousDeltaStart + deltaStart;
-            let line = buffer.lines[lineIndex as usize].clone();
-            let start_byte = utf16_to_byte_index(line.as_str(), charStartIndex as usize);
-            let end_byte = utf16_to_byte_index(line.as_str(), (charStartIndex + length) as usize);
-            let token_slice = &line[start_byte..end_byte]; 
-            
-            if let Some(data) = &self.data {
-                let token_type = data.capabilities.semanticTokensProvider.legend.tokenTypes[tokenIndex as usize].clone();
+        if let Some(semantics) = &self.semantics {
+            while index + 4 < semantics.data.len() {
+                current_data = semantics.data[index..index + 5].try_into().unwrap();
                 
-                let style = colors.get(&token_type);
-                currTokens.push(
-                    Token {
-                        text: token_slice.to_string(),
-                        style: style.copied(),
-                        offset: charStartIndex as usize
-                    }
-                );
+                let deltaLine = current_data[0];
+                let deltaStart = current_data[1];
+                let length = current_data[2];
+                let tokenIndex = current_data[3];
+                let tokenModifier = current_data[4];
+
+                if deltaLine != 0 {
+                    previousDeltaStart = 0;
+                    tokens.insert(previousDeltaLine as usize, currTokens);
+                    currTokens = Vec::new();
+                }
+
+                let lineIndex = previousDeltaLine + deltaLine;
+                let charStartIndex = previousDeltaStart + deltaStart;
+                let line = buffer.lines[lineIndex as usize].clone();
+                let start_byte = utf16_to_byte_index(line.as_str(), charStartIndex as usize);
+                let end_byte = utf16_to_byte_index(line.as_str(), (charStartIndex + length) as usize);
+                let token_slice = &line[start_byte..end_byte]; 
+                
+                if let Some(data) = &self.data {
+                    let token_type = data.capabilities.semanticTokensProvider.legend.tokenTypes[tokenIndex as usize].clone();
+                    
+                    let style = colors.get(&token_type);
+                    currTokens.push(
+                        Token {
+                            text: token_slice.to_string(),
+                            style: style.copied(),
+                            offset: charStartIndex as usize
+                        }
+                    );
+                }
+                previousDeltaStart = charStartIndex;
+                previousDeltaLine = lineIndex;
+                index += 5;
             }
-            previousDeltaStart = charStartIndex;
-            previousDeltaLine = lineIndex;
-            index += 5;
         }
 
         return tokens
