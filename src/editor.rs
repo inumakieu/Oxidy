@@ -14,6 +14,7 @@ use crate::renderer::Renderer;
 use crate::services::lsp_service::{LspService, LspServiceEvent};
 use crate::types::{EditorEvent, EditorMode, Size, Token};
 use crate::highlighter::Highlighter;
+use crate::ui::command::Command;
 use crate::ui::status_bar::StatusBar;
 use crate::ui::ui_manager::UiManager;
 
@@ -45,7 +46,9 @@ impl Editor {
 
         let mut ui = UiManager::new();
         let status_bar = StatusBar::new();
+        let command = Command::new();
         ui.add(status_bar);
+        ui.add(command);
 
         let lsp = LspService::new();
 
@@ -125,7 +128,14 @@ impl Editor {
             EditorCommand::MoveLeft => self.buffer.move_left(),
             EditorCommand::MoveRight => self.buffer.move_right(),
             EditorCommand::InsertChar(c) => self.buffer.insert_char(c),
-            EditorCommand::InsertCommandChar(c) => self.command.push(c),
+            EditorCommand::InsertCommandChar(c) => {
+                self.command.push(c);
+                let command = self.ui.get_mut::<Command>();
+
+                if let Some(command) = command {
+                    command.command = self.command.clone();
+                }
+            }
             EditorCommand::ChangeMode(mode) => self.mode = mode,
             EditorCommand::LeaveMode => self.mode = EditorMode::NORMAL,
             EditorCommand::RunCommand => {
@@ -140,6 +150,13 @@ impl Editor {
                         });
                     }, // TODO: Make it spawn lsp specified
                     _ => {}
+                }
+
+                self.command = "".to_string();
+                let command = self.ui.get_mut::<Command>();
+
+                if let Some(command) = command {
+                    command.command = self.command.clone();
                 }
             }
             EditorCommand::Save => {}, // self.plugins.save_buffer(&self.buffer),

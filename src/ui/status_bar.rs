@@ -1,3 +1,5 @@
+use std::any::Any;
+
 use crossterm::style::{Color, StyledContent, Stylize};
 
 use crate::{types::{RenderCell, RenderLine}, ui::ui_element::UiElement};
@@ -12,6 +14,9 @@ pub struct StatusBar {
 }
 
 impl UiElement for StatusBar {
+    fn as_any(&self) -> &dyn Any { self }
+    fn as_any_mut(&mut self) -> &mut dyn Any { self }
+
     fn render(&self, frame: &mut Vec<RenderLine>) {
         let mut items = vec![];
         let title = self.item(&self.name);
