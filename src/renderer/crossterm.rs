@@ -1,5 +1,6 @@
 use std::io::{self, stdout, Stdout, Write, StdoutLock};
 
+use crossterm::cursor::SetCursorStyle;
 use crossterm::event::{DisableMouseCapture, EnableMouseCapture};
 use crossterm::style::{Color, ContentStyle, ResetColor, SetStyle, StyledContent, Stylize};
 use crossterm::{cursor::{self, MoveTo}, terminal, QueueableCommand};
@@ -11,7 +12,7 @@ use unicode_segmentation::UnicodeSegmentation;
 use crate::highlighter::Highlighter;
 use crate::renderer::Renderer;
 use crate::buffer::Buffer;
-use crate::types::{RenderBuffer, RenderCell, RenderLine, Size};
+use crate::types::{EditorMode, RenderBuffer, RenderCell, RenderLine, Size};
 use crate::ui::ui_manager::UiManager;
 pub struct CrossTermRenderer {
     pub size: Size,
@@ -162,7 +163,7 @@ impl Renderer for CrossTermRenderer {
         self.output.queue(cursor::Hide).expect("Could not hide cursor.");
     }
 
-    fn draw_buffer(&mut self, buffer: &Buffer, ui: &UiManager, highlighter: &mut Highlighter) {
+    fn draw_buffer(&mut self, buffer: &mut Buffer, ui: &UiManager, highlighter: &mut Highlighter, editor_mode: &EditorMode) {
         let mut output = self.output.lock();
         queue!(output, MoveTo(0, 0)).expect("Could not move cursor to 0, 0.");
 
@@ -202,6 +203,14 @@ impl Renderer for CrossTermRenderer {
         self.render_buffer.drawn = self.render_buffer.current.clone();
         
         let checked_row = buffer.checked_row();
+
+        if *editor_mode == EditorMode::NORMAL {
+            let _ = self.output.queue(SetCursorStyle::BlinkingBlock);
+        } else {
+            let _ = self.output.queue(SetCursorStyle::BlinkingBar);
+        }
+          
+        buffer.clamp_cursor();
         if let Some(checked_row) = checked_row {
             let _ = self.output.queue(MoveTo(6 + buffer.cursor.col as u16, checked_row as u16 + 1));
         } else {

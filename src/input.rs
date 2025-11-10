@@ -1,14 +1,15 @@
 use std::{io, time::Duration};
 
-use crossterm::event::{poll, read, Event, KeyCode, KeyEvent};
+use crossterm::event::{poll, read, Event, KeyCode, KeyEvent, KeyModifiers};
 
-use crate::types::EditorMode;
+use crate::{buffer::BufferLocation, types::EditorMode};
 
 pub enum EditorCommand {
     MoveUp,
     MoveDown,
     MoveLeft,
     MoveRight,
+    JumpTo(BufferLocation),
     InsertChar(char),
     InsertCommandChar(char),
     Backspace,
@@ -47,16 +48,27 @@ impl CrosstermInput {
     }
 
     fn translate_key_event(&mut self, e: KeyEvent, mode: &EditorMode) -> EditorCommand {
+        let ctrl = e.modifiers.contains(KeyModifiers::CONTROL);
+
+        let handle_normal = |ch: char| {
+            match ch {
+                'i' => return EditorCommand::ChangeMode(EditorMode::INSERT),
+                ':' => return EditorCommand::ChangeMode(EditorMode::COMMAND),
+                'g' => return EditorCommand::JumpTo(BufferLocation::Top),
+                'G' => return EditorCommand::JumpTo(BufferLocation::Bottom),
+                'l' => return EditorCommand::JumpTo(BufferLocation::StartLine),
+                'L' => return EditorCommand::JumpTo(BufferLocation::EndLine),
+                _ => {}
+            }
+            // fallthrough no-op if you want:
+            EditorCommand::None
+        };
+
         match e.code {
             KeyCode::Char(ch) => {
                 match mode {
-                    EditorMode::NORMAL => {
-                        match ch {
-                            'i' => return EditorCommand::ChangeMode(EditorMode::INSERT),
-                            ':' => return EditorCommand::ChangeMode(EditorMode::COMMAND),
-                            _ => {}
-                        }
-                    }
+                    EditorMode::NORMAL => return handle_normal(ch),
+                    EditorMode::INSERT if ctrl => return handle_normal(ch),
                     EditorMode::INSERT => return EditorCommand::InsertChar(ch),
                     EditorMode::COMMAND => return EditorCommand::InsertCommandChar(ch)
                 }

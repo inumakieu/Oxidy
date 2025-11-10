@@ -2,22 +2,11 @@ use std::{
     fs::File, io::{Read, Result}, path::PathBuf, sync::mpsc::{self, Receiver}, thread
 };
 use std::sync::{Arc, Mutex};
+use crossterm::style::Color;
 use notify::{Event, EventKind, RecursiveMode, Watcher};
 use rhai::{serde::{from_dynamic, to_dynamic}, Dynamic, Engine, FnPtr, NativeCallContext, EvalAltResult, Scope};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-
-#[derive(Clone, Serialize, Deserialize, Debug)]
-pub struct ColorScheme {
-    pub default: ColorStyle,
-
-    pub bar: ColorStyle,
-
-    pub keyword: ColorStyle,
-    pub function: ColorStyle,
-    pub comment: ColorStyle,
-    pub literal: ColorStyle
-}
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct ColorStyle {
@@ -34,6 +23,7 @@ pub struct Options {
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct Config {
     pub opt: Options,
+    pub theme: String
 }
 
 pub struct PluginManager {
@@ -45,8 +35,8 @@ pub struct PluginManager {
     pub current_lang: Arc<Mutex<Option<String>>>,
 
     pub rx: Option<Receiver<Event>>,
-    
-    pub color_schemes: HashMap<String, ColorScheme>
+    pub themes: Arc<Mutex<HashMap<String, HashMap<String, Color>>>>,
+    pub current_theme: Arc<Mutex<Option<String>>>,
 }
 
 impl PluginManager {
@@ -56,6 +46,7 @@ impl PluginManager {
                 relative_numbers: false,
                 natural_scroll: false,
             },
+            theme: "".to_string()
         };
 
         let mut config_path = dirs::home_dir().expect("Could not find home directory.");
@@ -66,6 +57,8 @@ impl PluginManager {
         
         let ret: Self;
         let current_lang: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+        let themes = Arc::new(Mutex::new(HashMap::new()));
+        let current_theme = Arc::new(Mutex::new(None));
 
         if let Ok(mut config_file) = config_file {
             let mut config_string = String::new();
@@ -81,7 +74,8 @@ impl PluginManager {
                 syntax: Arc::new(Mutex::new(HashMap::new())),
                 current_lang,
                 rx: None,
-                color_schemes: HashMap::new(),
+                themes,
+                current_theme
             }
         } else {
             let ast = engine.compile("").unwrap();
@@ -93,7 +87,8 @@ impl PluginManager {
                 syntax: Arc::new(Mutex::new(HashMap::new())),
                 current_lang,
                 rx: None,
-                color_schemes: HashMap::new(),
+                themes,
+                current_theme
             }
         }
 
@@ -190,6 +185,61 @@ impl PluginManager {
         let oxidy_config_struct = to_dynamic(self.config.clone()).unwrap();
         scope.set_value("oxidy", oxidy_config_struct);
         
+        self.syntax();
+
+        self.theme();
+        
+        let _ = self.engine.eval_ast_with_scope::<()>(&mut scope, &self.ast);
+
+        let script_result: Dynamic = self.engine.eval_with_scope(&mut scope, "oxidy").unwrap();
+        self.config = from_dynamic(&script_result).unwrap();
+    }
+
+    pub fn get_current_theme_colors(&self) -> HashMap<String, Color> {
+        let themes = self.themes.lock().unwrap();
+        themes[&self.config.theme].clone()
+    }
+
+    fn theme(&mut self) {
+        {
+            let themes_map = self.themes.clone();         // Arc<Mutex<HashMap<String, HashMap<String, String>>>>
+            let current_theme = self.current_theme.clone(); // Arc<Mutex<Option<String>>>
+            self.engine.register_fn("set_color", move |key: String, value: String| {
+                // read lang, then drop the lock
+                let theme = {
+                    let guard = current_theme.lock().unwrap();
+                    guard.clone() // Option<String>
+                }.expect("set_color called outside of a color(...) block");
+
+                // write into syntax[lang][key] = value, creating the maps if needed
+                let mut all = themes_map.lock().unwrap();
+                let hex = value.trim_start_matches('#');
+                let r = u8::from_str_radix(&hex[0..2], 16).unwrap_or_default();
+                let g = u8::from_str_radix(&hex[2..4], 16).unwrap_or_default();
+                let b = u8::from_str_radix(&hex[4..6], 16).unwrap_or_default();
+
+                all.entry(theme).or_default().insert(key, Color::Rgb { r, g, b });
+            });
+        }
+
+        {
+            let current_theme = self.current_theme.clone(); 
+
+            self.engine.register_fn("theme", move |ctx: NativeCallContext, name: &str, callback: FnPtr| {
+                {
+                    let mut slot = current_theme.lock().unwrap();
+                    *slot = Some(name.to_string());
+                }
+                let _: () = callback.call_within_context(
+                    &ctx, 
+                    ()
+                ).unwrap();
+            });
+        }
+
+    }
+
+    fn syntax(&mut self) {
         {
             let syntax_map = self.syntax.clone();         // Arc<Mutex<HashMap<String, HashMap<String, String>>>>
             let current_lang = self.current_lang.clone(); // Arc<Mutex<Option<String>>>
@@ -220,10 +270,6 @@ impl PluginManager {
                 ).unwrap();
             });
         }
-        let _ = self.engine.eval_ast_with_scope::<()>(&mut scope, &self.ast);
-
-        let script_result: Dynamic = self.engine.eval_with_scope(&mut scope, "oxidy").unwrap();
-        self.config = from_dynamic(&script_result).unwrap();
     }
 }
 

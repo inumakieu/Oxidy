@@ -57,8 +57,8 @@ impl StatusBar {
         Self {
             name: "Oxidy".to_string(),
             file: "file.rs".to_string(),
-            bg: Color::Rgb { r: 32, g: 31, b: 37 },
-            fg: Color::Rgb { r: 230, g: 225, b: 233 },
+            bg: Color::Rgb { r: 202, g: 190, b: 255 },
+            fg: Color::Rgb { r: 49, g: 40, b: 95 },
             left_symbol: "".to_string(),
             right_symbol: "".to_string()
         }

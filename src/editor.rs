@@ -3,16 +3,14 @@
 use std::io::{self, Read};
 use std::sync::Arc;
 use std::fs::File;
-use std::thread;
 
 use crate::buffer::Buffer;
 use crate::input::{EditorCommand, InputHandler};
-use crate::lsp::LspClient::LspClient;
 
 use crate::plugin_manager::PluginManager;
 use crate::renderer::Renderer;
 use crate::services::lsp_service::{LspService, LspServiceEvent};
-use crate::types::{EditorEvent, EditorMode, Size, Token};
+use crate::types::{EditorEvent, EditorMode, Size};
 use crate::highlighter::Highlighter;
 use crate::ui::command::Command;
 use crate::ui::status_bar::StatusBar;
@@ -92,6 +90,7 @@ impl Editor {
     pub fn run(&mut self) -> io::Result<()> {
         
         loop {
+            self.plugins.poll_reload();
             if let Some(lsp) = self.lsp.as_mut() {
                 match lsp.poll() {
                     LspServiceEvent::Initialized => {
@@ -102,7 +101,7 @@ impl Editor {
                         lsp.request_semantic_tokens(&self.buffer);
                     }
                     LspServiceEvent::ReceivedSemantics { semantics } => {
-                        self.highlighter.tokens = lsp.set_tokens(&self.buffer);
+                        self.highlighter.tokens = lsp.set_tokens(&self.buffer, self.plugins.get_current_theme_colors());
                     }
                     _ => {}
                 }
@@ -113,8 +112,9 @@ impl Editor {
                 }
             }
 
+
             self.renderer.begin_frame();
-            self.renderer.draw_buffer(&self.buffer, &self.ui, &mut self.highlighter);
+            self.renderer.draw_buffer(&mut self.buffer, &self.ui, &mut self.highlighter, &self.mode);
             self.renderer.end_frame();
         }
 
@@ -127,6 +127,7 @@ impl Editor {
             EditorCommand::MoveDown => self.buffer.move_down(),
             EditorCommand::MoveLeft => self.buffer.move_left(),
             EditorCommand::MoveRight => self.buffer.move_right(),
+            EditorCommand::JumpTo(loc) => self.buffer.jump_to(loc),
             EditorCommand::InsertChar(c) => self.buffer.insert_char(c),
             EditorCommand::InsertCommandChar(c) => {
                 self.command.push(c);
@@ -136,7 +137,29 @@ impl Editor {
                     command.command = self.command.clone();
                 }
             }
-            EditorCommand::ChangeMode(mode) => self.mode = mode,
+            EditorCommand::ChangeMode(mode) => {
+                self.mode = mode;
+                let command = self.ui.get_mut::<Command>();
+
+                if let Some(command) = command {
+                    command.shown = self.mode == EditorMode::COMMAND;
+                }
+            }
+            EditorCommand::Backspace => {
+                match self.mode {
+                    EditorMode::INSERT => self.buffer.delete_char(),
+                    EditorMode::COMMAND => {
+                        self.command.pop();
+                        let command = self.ui.get_mut::<Command>();
+
+                        if let Some(command) = command {
+                            command.command = self.command.clone();
+                        }
+                    }
+                    _ => {}
+                }
+                self.buffer.delete_char()
+            }
             EditorCommand::LeaveMode => self.mode = EditorMode::NORMAL,
             EditorCommand::RunCommand => {
                 match self.command.as_str() {

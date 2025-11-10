@@ -4,7 +4,7 @@ use std::{
     thread,
 };
 use std::process::Command;
-use std::{io::{BufRead, BufReader, Read, Write}, process::{Child, ChildStdin, ChildStdout, Stdio}};
+use std::{io::{BufRead, BufReader, Read, Write}, process::{Child, Stdio}};
 
 use crossterm::style::Color;
 use serde_json::Value;
@@ -13,9 +13,8 @@ use crate::buffer::Buffer;
 use crate::lsp::LspResponse::LspDiagnostics;
 use crate::{
     lsp::{
-        LspClient::LspClient, 
         LspMessage::{DidOpenParams, InitializeClientCapabilities, InitializeParams, InitializedParams, LspMessage, SemanticTokenParams, SemanticTokenTextDocumentItem, TextDocumentItem}, 
-        LspResponse::{LspDidOpenResponseResult, LspResponse, LspResponseResult, LspSemanticResponseResult}
+        LspResponse::{LspResponse, LspResponseResult, LspSemanticResponseResult}
     }, 
     types::Token
 };
@@ -266,7 +265,7 @@ impl LspService {
     }
 
 
-    pub fn set_tokens(&self, buffer: &Buffer) -> Vec<Vec<Token>> {
+    pub fn set_tokens(&self, buffer: &Buffer, colors: HashMap<String, Color>) -> Vec<Vec<Token>> {
         let mut current_data: [i32; 5];
         let mut index = 0;
         let mut previousDeltaStart = 0;
@@ -274,30 +273,6 @@ impl LspService {
 
         let mut tokens: Vec<Vec<Token>> = vec![Vec::new(); buffer.lines.len()];
         let mut currTokens: Vec<Token> = Vec::new();
-
-        let mut colors: HashMap<String, Color> = HashMap::new();
-        colors.insert("namespace".into(), Color::Cyan);
-        colors.insert("type".into(), Color::Rgb { r: 201, g: 195, b: 220 });
-        colors.insert("class".into(), Color::Rgb { r: 201, g: 195, b: 220 });
-        colors.insert("enum".into(), Color::Rgb { r: 201, g: 195, b: 220 });
-        colors.insert("interface".into(), Color::Rgb { r: 201, g: 195, b: 220 });
-        colors.insert("struct".into(), Color::Rgb { r: 201, g: 195, b: 220 });
-        colors.insert("typeParameter".into(), Color::Cyan);
-        colors.insert("parameter".into(), Color::Rgb { r: 201, g: 195, b: 220 });
-        colors.insert("variable".into(), Color::Rgb { r: 230, g: 225, b: 233 });
-        colors.insert("property".into(), Color::Grey);
-        colors.insert("enumMember".into(), Color::Yellow);
-        colors.insert("event".into(), Color::Green);
-        colors.insert("function".into(), Color::Green);
-        colors.insert("method".into(), Color::Green);
-        colors.insert("macro".into(), Color::Rgb { r: 202, g: 190, b: 255 });
-        colors.insert("keyword".into(), Color::Rgb { r: 202, g: 190, b: 255 });
-        colors.insert("modifier".into(), Color::Rgb { r: 202, g: 190, b: 255 });
-        colors.insert("comment".into(), Color::DarkGrey);
-        colors.insert("string".into(), Color::Yellow);
-        colors.insert("number".into(), Color::Magenta);
-        colors.insert("regexp".into(), Color::Magenta);
-        colors.insert("operator".into(), Color::DarkMagenta);
 
         if let Some(semantics) = &self.semantics {
             while index + 4 < semantics.data.len() {
