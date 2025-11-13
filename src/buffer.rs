@@ -83,21 +83,37 @@ impl Buffer {
     }
 
     pub fn insert_newline(&mut self) {
-        if let Some(line) = self.lines.get(self.cursor.row + self.scroll_offset) {
-            // check if inside a line
-            if self.cursor.col < line.len() - 1 {
-                let splits = line.split_at(self.cursor.col);
-                self.lines.insert(self.cursor.row + self.scroll_offset + 1, splits.1.to_string());
-                return
-            }
+        if self.cursor.row >= self.lines.len() {
+            return;
+        }
 
-            // if not, just insert new empty line
-            self.lines.insert(self.cursor.row + self.scroll_offset + 1, "".to_string());
+        // Take ownership of the current line (no borrow remains)
+        let line = self.lines.remove(self.cursor.row);
+
+        if self.cursor.col < line.len() {
+            let (first, second) = line.split_at(self.cursor.col);
+
+            self.lines.insert(self.cursor.row, first.to_string());
+            self.lines.insert(self.cursor.row + 1, second.to_string());
+        } else {
+            // cursor at end → insert empty line
+            self.lines.insert(self.cursor.row, line);
+            self.lines.insert(self.cursor.row + 1, String::new());
+        }
+
+        self.cursor.row += 1;
+        self.cursor.col = 0;
+    }
+
+    pub fn insert_tab(&mut self, tab_size: &usize) {
+        if let Some(line) = self.lines.get_mut(self.cursor.row) {
+            line.insert_str(self.cursor.col, " ".repeat(*tab_size).as_str());
+            self.cursor.col += *tab_size;
         }
     }
 
     pub fn clamp_cursor(&mut self) {
-        if let Some(line) = self.lines.get(self.cursor.row + self.scroll_offset) {
+        if let Some(line) = self.lines.get(self.cursor.row) {
             self.cursor.col = self.cursor.col.clamp(0, line.len());
         }
         self.cursor.row = self.cursor.row.clamp(0, self.lines.len() - 1);
@@ -149,7 +165,7 @@ impl Buffer {
                 self.scroll_offset = self.cursor.row - (self.size.rows as usize - 1);
             }
             BufferLocation::StartLine => {
-                if let Some(line) = self.lines.get(self.cursor.row + self.scroll_offset) {
+                if let Some(line) = self.lines.get(self.cursor.row) {
                     if let Some(index) = self.get_first_non_whitespace_char_index(&line) {
                         self.cursor.col = index;
                         return;
@@ -159,7 +175,7 @@ impl Buffer {
                 self.cursor.col = 0;
             }
             BufferLocation::EndLine => {
-                if let Some(line) = self.lines.get(self.cursor.row + self.scroll_offset) {
+                if let Some(line) = self.lines.get(self.cursor.row) {
                     self.cursor.col = line.len();
                 }            
             }

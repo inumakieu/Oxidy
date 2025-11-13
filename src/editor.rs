@@ -102,6 +102,7 @@ impl Editor {
                     }
                     LspServiceEvent::ReceivedSemantics { semantics } => {
                         self.highlighter.tokens = lsp.set_tokens(&self.buffer, self.plugins.get_current_theme_colors());
+                        self.highlighter.cache.clear();
                     }
                     _ => {}
                 }
@@ -114,7 +115,7 @@ impl Editor {
 
 
             self.renderer.begin_frame();
-            self.renderer.draw_buffer(&mut self.buffer, &self.ui, &mut self.highlighter, &self.mode);
+            self.renderer.draw_buffer(&mut self.buffer, &self.ui, &mut self.highlighter, &self.mode, &self.plugins.config);
             self.renderer.end_frame();
         }
 
@@ -137,6 +138,8 @@ impl Editor {
                     command.command = self.command.clone();
                 }
             }
+            EditorCommand::Tab => self.buffer.insert_tab(&self.plugins.config.opt.tab_size),
+            EditorCommand::Enter => self.buffer.insert_newline(),
             EditorCommand::ChangeMode(mode) => {
                 self.mode = mode;
                 let command = self.ui.get_mut::<Command>();
@@ -158,12 +161,23 @@ impl Editor {
                     }
                     _ => {}
                 }
-                self.buffer.delete_char()
             }
-            EditorCommand::LeaveMode => self.mode = EditorMode::NORMAL,
+            EditorCommand::LeaveMode => {
+                self.mode = EditorMode::NORMAL;
+                let command = self.ui.get_mut::<Command>();
+
+                if let Some(command) = command {
+                    command.shown = false;
+                }
+
+            }
             EditorCommand::RunCommand => {
                 match self.command.as_str() {
                     "q" => return Ok(EditorEvent::Exit),
+                    "w" => {
+                        self.plugins.save_buffer(&self.buffer);
+                        return Ok(EditorEvent::Save)
+                    }
                     "lsp" => {
                         let buffer_clone = self.buffer.clone();
                         let root_index = buffer_clone.path.rfind("/").unwrap();
@@ -182,7 +196,7 @@ impl Editor {
                     command.command = self.command.clone();
                 }
             }
-            EditorCommand::Save => {}, // self.plugins.save_buffer(&self.buffer),
+            EditorCommand::Save => self.plugins.save_buffer(&self.buffer),
             EditorCommand::Quit => return Ok(EditorEvent::Exit),
             _ => {}
         }

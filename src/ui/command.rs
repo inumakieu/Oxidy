@@ -18,8 +18,13 @@ impl Command {
             shown: false,
         }
     }
+    
     pub fn update_command(&mut self, new_command: String) {
         self.command = new_command;
+    }
+
+    pub fn get_position(&self) -> usize {
+        return 6 + self.command.len()
     }
 }
 

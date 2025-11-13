@@ -15,6 +15,15 @@ impl UiManager {
         self.elements.push(Box::new(element));
     }
 
+    pub fn get<T: UiElement + 'static>(&self) -> Option<&T> {
+        for element in &self.elements {
+            if let Some(found) = element.as_any().downcast_ref::<T>() {
+                return Some(found);
+            }
+        }
+        None
+    }
+
     pub fn get_mut<T: UiElement + 'static>(&mut self) -> Option<&mut T> {
         for element in &mut self.elements {
             if let Some(found) = element.as_any_mut().downcast_mut::<T>() {

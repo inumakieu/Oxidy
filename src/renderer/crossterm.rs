@@ -10,9 +10,11 @@ use unicode_width::UnicodeWidthStr;
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::highlighter::Highlighter;
+use crate::plugin_manager::Config;
 use crate::renderer::Renderer;
 use crate::buffer::Buffer;
 use crate::types::{EditorMode, RenderBuffer, RenderCell, RenderLine, Size};
+use crate::ui::command::Command;
 use crate::ui::ui_manager::UiManager;
 pub struct CrossTermRenderer {
     pub size: Size,
@@ -28,13 +30,36 @@ impl CrossTermRenderer {
         output.execute(EnableMouseCapture).expect("Could not enable mouse capture.");
 
         Self { 
-            size: size, 
+            size: size.clone(), 
             render_buffer: RenderBuffer { 
-                drawn: Vec::new(), 
-                current: Vec::new() 
+                drawn: vec![
+                    RenderLine { cells: Vec::new() }
+                    ; size.rows as usize
+                ], 
+                current: vec![
+                    RenderLine { cells: Vec::new() }
+                    ; size.rows as usize
+                ] 
             }, 
             output: output,
         }
+    }
+
+    fn line_visually_changed(&self, a: &RenderLine, b: &RenderLine) -> bool {
+        if a.cells.len() != b.cells.len() {
+            return true;
+        }
+
+        for (c1, c2) in a.cells.iter().zip(b.cells.iter()) {
+            if c1.ch != c2.ch {
+                return true;
+            }
+            if c1.style != c2.style {
+                return true;
+            }
+        }
+
+        false
     }
     
     fn redraw_line(&self, output: &mut StdoutLock, render_line: &RenderLine) {
@@ -60,7 +85,7 @@ impl CrossTermRenderer {
         let _ = queue!(output, ResetColor);
     }
 
-    fn textfield(&mut self, buffer: &Buffer, highlighter: &mut Highlighter) -> io::Result<()> {
+    fn textfield(&mut self, buffer: &Buffer, highlighter: &mut Highlighter, config: &Config) -> io::Result<()> {
         for row in 0..(self.size.rows - 1) {
             let line = buffer.get_at(row as usize);
             let mut current_render_line = RenderLine { 
@@ -81,8 +106,7 @@ impl CrossTermRenderer {
             let line_number = {
                 let current_line = buffer.cursor.row as i16 + 1;
                 let line_number: StyledContent<String>;
-                if false {// self.plugin_manager.config.opt.relative_numbers {
-                    // TODO: Add relative numbers back
+                if config.opt.relative_numbers {
                     let signed_row = row as i16 + 1;
                     let signed_scroll_offset = buffer.scroll_offset as i16;
                     let relative_distance = (current_line - (signed_row + signed_scroll_offset)).abs();
@@ -163,7 +187,7 @@ impl Renderer for CrossTermRenderer {
         self.output.queue(cursor::Hide).expect("Could not hide cursor.");
     }
 
-    fn draw_buffer(&mut self, buffer: &mut Buffer, ui: &UiManager, highlighter: &mut Highlighter, editor_mode: &EditorMode) {
+    fn draw_buffer(&mut self, buffer: &mut Buffer, ui: &UiManager, highlighter: &mut Highlighter, editor_mode: &EditorMode, config: &Config) {
         let mut output = self.output.lock();
         queue!(output, MoveTo(0, 0)).expect("Could not move cursor to 0, 0.");
 
@@ -175,7 +199,7 @@ impl Renderer for CrossTermRenderer {
         };
         self.render_buffer.current = vec![empty_line; self.size.rows as usize];
 
-        let _ = self.textfield(buffer, highlighter);
+        let _ = self.textfield(buffer, highlighter, config);
 
         ui.render(&mut self.render_buffer.current);
 
@@ -187,11 +211,13 @@ impl Renderer for CrossTermRenderer {
             let current_line = current_line.clone();
 
             if let Some(drawn_line) = self.render_buffer.drawn.get(index) {
-                if *drawn_line != current_line {
+                if self.line_visually_changed(drawn_line, &current_line) {
                     self.redraw_line(&mut output, &current_line);
+                    self.render_buffer.drawn[index] = current_line.clone();
                 }
             } else {
                 self.redraw_line(&mut output, &current_line);
+                self.render_buffer.drawn[index] = current_line.clone();
             }
 
             // only print newline if not last
@@ -200,7 +226,7 @@ impl Renderer for CrossTermRenderer {
             }
         }
         // current -> drawn
-        self.render_buffer.drawn = self.render_buffer.current.clone();
+        // self.render_buffer.drawn = self.render_buffer.current.clone();
         
         let checked_row = buffer.checked_row();
 
@@ -211,11 +237,24 @@ impl Renderer for CrossTermRenderer {
         }
           
         buffer.clamp_cursor();
-        if let Some(checked_row) = checked_row {
-            let _ = self.output.queue(MoveTo(6 + buffer.cursor.col as u16, checked_row as u16 + 1));
-        } else {
-            let _ = self.output.queue(MoveTo(6 + buffer.cursor.col as u16, 1));
-        }   
+        match editor_mode {
+            EditorMode::INSERT |
+            EditorMode::NORMAL => {
+                if let Some(checked_row) = checked_row {
+                    let _ = self.output.queue(MoveTo(6 + buffer.cursor.col as u16, checked_row as u16 + 1));
+                } else {
+                    let _ = self.output.queue(MoveTo(6 + buffer.cursor.col as u16, 1));
+                }  
+            }
+            EditorMode::COMMAND => {
+                let command = ui.get::<Command>();
+
+                if let Some(command) = command {
+                    let _ = self.output.queue(MoveTo(command.get_position() as u16, 1));
+                }
+            }
+        }
+         
     } 
 
     fn end_frame(&mut self) {

@@ -1,5 +1,5 @@
 use std::{
-    fs::File, io::{Read, Result}, path::PathBuf, sync::mpsc::{self, Receiver}, thread
+    fs::{write, File}, io::{Read, Result}, path::PathBuf, sync::mpsc::{self, Receiver}, thread
 };
 use std::sync::{Arc, Mutex};
 use crossterm::style::Color;
@@ -7,6 +7,8 @@ use notify::{Event, EventKind, RecursiveMode, Watcher};
 use rhai::{serde::{from_dynamic, to_dynamic}, Dynamic, Engine, FnPtr, NativeCallContext, EvalAltResult, Scope};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+
+use crate::buffer::Buffer;
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct ColorStyle {
@@ -17,7 +19,8 @@ pub struct ColorStyle {
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct Options {
     pub relative_numbers: bool,
-    pub natural_scroll: bool
+    pub natural_scroll: bool,
+    pub tab_size: usize
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -45,6 +48,7 @@ impl PluginManager {
             opt: Options {
                 relative_numbers: false,
                 natural_scroll: false,
+                tab_size: 2
             },
             theme: "".to_string()
         };
@@ -270,6 +274,11 @@ impl PluginManager {
                 ).unwrap();
             });
         }
+    }
+
+    pub fn save_buffer(&self, buffer: &Buffer) {
+        let content = buffer.lines.join("\n");
+        let _ = write(buffer.path.clone(), content);
     }
 }
 

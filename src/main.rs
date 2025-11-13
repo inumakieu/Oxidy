@@ -25,7 +25,7 @@ use crate::plugin_manager::PluginManager;
 use crate::renderer::crossterm::CrossTermRenderer;
 use crate::types::Size;
 
-
+// Oxidy comment
 fn main() -> io::Result<()> {
     let mut args = env::args();
     args.next();
