@@ -49,14 +49,19 @@ impl Buffer {
     }
 
     pub fn insert_char(&mut self, c: char) {
-        if let Some(line) = self.lines.get_mut(self.cursor.row + self.scroll_offset) {
-            line.insert(self.cursor.col, c);
+        if let Some(line) = self.lines.get_mut(self.cursor.row) {
+            // check if cursor is inside char (unicode)
+            let byte_idx = line.char_indices()
+                .nth(self.cursor.col)
+                .map(|(i, _)| i)
+                .unwrap_or_else(|| line.len());
+            line.insert(byte_idx, c);
             self.move_right();
         }
     }
 
     pub fn delete_char(&mut self) {
-        let line_index = self.cursor.row + self.scroll_offset;
+        let line_index = self.cursor.row;
         let mut new_col = self.cursor.col;
         let mut move_up = false;
 
@@ -73,7 +78,11 @@ impl Buffer {
             }
         } else if let Some(line) = self.lines.get_mut(line_index) {
             if self.cursor.col <= line.len() {
-                line.remove(self.cursor.col - 1);
+                let byte_idx = line.char_indices()
+                    .nth(self.cursor.col - 1)
+                    .map(|(i, _)| i)
+                    .unwrap_or_else(|| line.len());
+                line.remove(byte_idx);
                 new_col -= 1;
             }
         }
@@ -146,7 +155,7 @@ impl Buffer {
     }
 
     pub fn move_right(&mut self) {
-        if let Some(line) = self.lines.get(self.cursor.row + self.scroll_offset) {
+        if let Some(line) = self.lines.get(self.cursor.row) {
             if self.cursor.col == line.len() { return }
 
             self.cursor.col += 1;
