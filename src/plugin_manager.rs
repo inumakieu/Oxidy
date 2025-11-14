@@ -4,7 +4,7 @@ use std::{
 use std::sync::{Arc, Mutex};
 use crossterm::style::Color;
 use notify::{Event, EventKind, RecursiveMode, Watcher};
-use rhai::{serde::{from_dynamic, to_dynamic}, Dynamic, Engine, FnPtr, NativeCallContext, EvalAltResult, Scope};
+use rhai::{module_resolvers::FileModuleResolver, serde::{from_dynamic, to_dynamic}, Dynamic, Engine, EvalAltResult, FnPtr, NativeCallContext, Scope};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -57,7 +57,16 @@ impl PluginManager {
         config_path.push(".config/oxidy/config.rhai");
 
         let config_file = File::open(&config_path);
-        let engine = Engine::new();
+        let mut engine = Engine::new();
+
+        
+        let mut resolver = FileModuleResolver::new();
+        let mut base = dirs::home_dir().unwrap();
+        base.push(".config/oxidy/");
+        resolver.set_base_path(base); // or your ~/.config/oxidy
+        engine.set_module_resolver(resolver);
+        // engine.enable_imports(true);
+        
         
         let ret: Self;
         let current_lang: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
