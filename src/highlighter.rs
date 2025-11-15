@@ -18,15 +18,42 @@ pub struct Highlighter {
 
 impl Highlighter {
     pub fn new(rules: Arc<Mutex<HashMap<String, HashMap<String, String>>>>) -> Self {
-        let mut colors: HashMap<String, Color> = HashMap::new(); 
-        colors.insert("keywords".to_string(), Color::Red);
-        colors.insert("comments".to_string(), Color::DarkGrey);
-        colors.insert("literals".to_string(), Color::Yellow);
-        colors.insert("functions".to_string(), Color::Green);
+        let mut colors: HashMap<String, Color> = HashMap::new();
 
-        // rules.push((Regex::new(r"\b(let|pub|impl|fn|use)\b").unwrap(), Color::Red));
-        
-        Self { current_filetype: "".to_string(), rules, colors, cache: HashMap::new(), tokens: Vec::new() }
+        colors.insert("namespace".into(), Color::Blue);
+        colors.insert("type".into(), Color::Magenta);
+        colors.insert("class".into(), Color::Magenta);
+        colors.insert("enum".into(), Color::Magenta);
+        colors.insert("interface".into(), Color::Magenta);
+        colors.insert("struct".into(), Color::Magenta);
+        colors.insert("typeParameter".into(), Color::Cyan);
+
+        colors.insert("parameter".into(), Color::White);
+        colors.insert("variable".into(), Color::White);
+        colors.insert("property".into(), Color::Yellow);
+        colors.insert("enumMember".into(), Color::Yellow);
+
+        colors.insert("event".into(), Color::Green);
+        colors.insert("function".into(), Color::Green);
+        colors.insert("method".into(), Color::Green);
+        colors.insert("macro".into(), Color::Cyan);
+
+        colors.insert("keyword".into(), Color::Blue);
+        colors.insert("modifier".into(), Color::Blue);
+        colors.insert("operator".into(), Color::White);
+
+        colors.insert("comment".into(), Color::DarkGrey);
+        colors.insert("string".into(), Color::Red);
+        colors.insert("number".into(), Color::Cyan);
+        colors.insert("regexp".into(), Color::Cyan);
+
+        Self {
+            current_filetype: "".to_string(),
+            rules,
+            colors,
+            cache: HashMap::new(),
+            tokens: Vec::new(),
+        }
     }
 
     pub fn init(&mut self, current_filetype: String) {
@@ -77,7 +104,6 @@ impl Highlighter {
                     .for_each(|cap| {
                         if let Some(cap) = cap.get(1) {
                             tokens.push(Token { text: cap.as_str().to_string(), offset: cap.start(), style: Some(self.colors[key].clone()) })
-
                         }
                     });
             }

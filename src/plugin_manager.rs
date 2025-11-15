@@ -208,9 +208,13 @@ impl PluginManager {
         self.config = from_dynamic(&script_result).unwrap();
     }
 
-    pub fn get_current_theme_colors(&self) -> HashMap<String, Color> {
+    pub fn get_current_theme_colors(&self) -> Option<HashMap<String, Color>> {
         let themes = self.themes.lock().unwrap();
-        themes[&self.config.theme].clone()
+        if let Some(colors) = themes.get(&self.config.theme) {
+            return Some(colors.clone())
+        }
+
+        None
     }
 
     fn theme(&mut self) {

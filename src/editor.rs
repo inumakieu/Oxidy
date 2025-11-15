@@ -87,8 +87,7 @@ impl Editor {
         Ok(())
     }
 
-    pub fn run(&mut self) -> io::Result<()> {
-        
+    pub fn run(&mut self) -> io::Result<()> {        
         loop {
             self.plugins.poll_reload();
             if let Some(lsp) = self.lsp.as_mut() {
@@ -100,9 +99,11 @@ impl Editor {
                     LspServiceEvent::OpenedFile => {
                         lsp.request_semantic_tokens(&self.buffer);
                     }
-                    LspServiceEvent::ReceivedSemantics { semantics } => {
-                        self.highlighter.tokens = lsp.set_tokens(&self.buffer, self.plugins.get_current_theme_colors());
+                    LspServiceEvent::ReceivedSemantics { semantics: _ } => {
+                        let colors = self.plugins.get_current_theme_colors().unwrap_or(self.highlighter.colors.clone());
+                        self.highlighter.tokens = lsp.set_tokens(&self.buffer, colors);
                         self.highlighter.cache.clear();
+                        
                     }
                     _ => {}
                 }
@@ -177,6 +178,18 @@ impl Editor {
                     "w" => {
                         self.plugins.save_buffer(&self.buffer);
                         return Ok(EditorEvent::Save)
+                    }
+                    theme if theme.contains("theme ") => {
+                        let split: Vec<&str> = theme.split_whitespace().collect();
+                        let name = split[1];
+                        self.plugins.config.theme = name.to_string();
+
+                        let colors = self.plugins.get_current_theme_colors().unwrap_or(self.highlighter.colors.clone());
+                        if let Some(lsp) = self.lsp.as_mut() {
+                            self.highlighter.tokens = lsp.set_tokens(&self.buffer, colors);
+                        }
+
+                        self.highlighter.cache.clear();
                     }
                     "lsp" => {
                         let buffer_clone = self.buffer.clone();
