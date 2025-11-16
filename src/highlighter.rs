@@ -20,6 +20,9 @@ impl Highlighter {
     pub fn new(rules: Arc<Mutex<HashMap<String, HashMap<String, String>>>>) -> Self {
         let mut colors: HashMap<String, Color> = HashMap::new();
 
+        colors.insert("bg".into(), Color::Reset);
+        colors.insert("fg".into(), Color::White);
+
         colors.insert("namespace".into(), Color::Blue);
         colors.insert("type".into(), Color::Magenta);
         colors.insert("class".into(), Color::Magenta);
@@ -93,7 +96,7 @@ impl Highlighter {
             let syntax_map = self.rules.lock().unwrap();
             let rules = syntax_map.get(&self.current_filetype);
             if rules.is_none() {
-                tokens.push(Token { text: line.to_string(), offset: 0, style: Some(Color::White) });
+                tokens.push(Token { text: line.to_string(), offset: 0, style: Some(self.colors["fg"].clone()) });
                 return tokens
             }
 

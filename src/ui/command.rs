@@ -33,13 +33,15 @@ impl UiElement for Command {
     fn as_any_mut(&mut self) -> &mut dyn Any { self }
 
     fn render(&self, frame: &mut Vec<RenderLine>) {
+        let reset_color = Color::Rgb { r: 22, g: 22, b: 23 };
+        let fg = Color::Rgb { r: 201, g: 199, b: 205 };
         if !self.shown { return }
 
         let mut render_line = RenderLine {
             cells: Vec::new()
         };
 
-        let text = self.command.clone().on(Color::Reset).white();
+        let text = self.command.clone().on(reset_color.clone()).with(fg.clone());
 
         render_line.cells.push(
             RenderCell { ch: "     ".to_string(), style: text.style().clone() }

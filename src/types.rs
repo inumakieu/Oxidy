@@ -9,7 +9,7 @@ pub struct Size {
     pub rows: u16
 }
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Clone)]
 pub enum EditorMode {
     INSERT,
     COMMAND,

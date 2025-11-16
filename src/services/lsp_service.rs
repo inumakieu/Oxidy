@@ -5,6 +5,7 @@ use std::{
 };
 use std::process::Command;
 use std::{io::{BufRead, BufReader, Read, Write}, process::{Child, Stdio}};
+use std::fs::write;
 
 use crossterm::style::Color;
 use serde_json::Value;
@@ -286,7 +287,7 @@ impl LspService {
 
                 if deltaLine != 0 {
                     previousDeltaStart = 0;
-                    tokens.insert(previousDeltaLine as usize, currTokens);
+                    tokens[previousDeltaLine as usize] = currTokens;
                     currTokens = Vec::new();
                 }
 
@@ -295,12 +296,26 @@ impl LspService {
                 let line = buffer.lines[lineIndex as usize].clone();
                 let start_byte = utf16_to_byte_index(line.as_str(), charStartIndex as usize);
                 let end_byte = utf16_to_byte_index(line.as_str(), (charStartIndex + length) as usize);
-                let token_slice = &line[start_byte..end_byte]; 
-                
+                let token_slice = &line[start_byte..end_byte];  
+
                 if let Some(data) = &self.data {
-                    let token_type = data.capabilities.semanticTokensProvider.legend.tokenTypes[tokenIndex as usize].clone();
-                    
-                    let style = colors.get(&token_type);
+                    let token_type = data.capabilities.semanticTokensProvider.legend.tokenTypes[tokenIndex as usize].clone(); 
+                    let mut final_key = token_type.clone();
+
+                    let mut mods = vec![];
+                    for bit in 0..data.capabilities.semanticTokensProvider.legend.tokenModifiers.len() {
+                        if tokenModifier & (1 << bit) != 0 {
+                            mods.push(data.capabilities.semanticTokensProvider.legend.tokenModifiers[bit].clone());
+                        }
+                    }
+
+                    if !mods.is_empty() {
+                        final_key = format!("{}.{:?}", token_type, mods.join("."));
+                    }
+
+                    let style = colors
+                        .get(&final_key)
+                        .or_else(|| colors.get(&token_type));
                     currTokens.push(
                         Token {
                             text: token_slice.to_string(),

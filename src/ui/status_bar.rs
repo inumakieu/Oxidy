@@ -3,10 +3,14 @@ use std::any::Any;
 use crossterm::style::{Color, StyledContent, Stylize};
 
 use crate::{types::{RenderCell, RenderLine}, ui::ui_element::UiElement};
+use crate::buffer::Cursor;
+use crate::types::EditorMode;
 
 pub struct StatusBar {
     pub name: String,
     pub file: String,
+    pub pos: Cursor,
+    pub mode: EditorMode,
     pub bg: Color,
     pub fg: Color,
     pub left_symbol: String,
@@ -21,7 +25,14 @@ impl UiElement for StatusBar {
         let mut items = vec![];
         let title = self.item(&self.name);
         let file_path = self.item(&self.file);
-        let state = format!("{:02}:{:02}{}", 1, 1, " INS");
+
+        let mode = match self.mode {
+            EditorMode::INSERT => " INS",
+            EditorMode::COMMAND => " CMD",
+            _ => ""
+        };
+
+        let state = format!("{:02}:{:02}{}", self.pos.col + 1, self.pos.row + 1, mode);
         let state_item = self.item(&state);
 
         items.extend(title);
@@ -57,24 +68,29 @@ impl StatusBar {
         Self {
             name: "Oxidy".to_string(),
             file: "file.rs".to_string(),
-            bg: Color::Rgb { r: 202, g: 190, b: 255 },
-            fg: Color::Rgb { r: 49, g: 40, b: 95 },
+            pos: Cursor { col: 0, row: 0 },
+            mode: EditorMode::NORMAL,
+            bg: Color::Rgb { r: 68, g: 68, b: 72 },
+            fg: Color::Rgb { r: 201, g: 199, b: 205 },
             left_symbol: "".to_string(),
             right_symbol: "".to_string()
         }
     }
 
-    fn item(&self, title: &str) -> Vec<StyledContent<String>> { 
+    fn item(&self, title: &str) -> Vec<StyledContent<String>> {
+        let reset_color = Color::Rgb { r: 22, g: 22, b: 23 };
+
         let item = vec![
-            self.left_symbol.clone().on(Color::Reset).with(self.bg.clone()),
+            self.left_symbol.clone().on(reset_color.clone()).with(self.bg.clone()),
             format!(" {} ", title).on(self.bg.clone()).with(self.fg.clone()),
-            self.right_symbol.clone().on(Color::Reset).with(self.bg.clone()),
+            self.right_symbol.clone().on(reset_color.clone()).with(self.bg.clone()),
         ];
 
         item
     }
 
     fn spacer(&self, amount: usize) -> StyledContent<String> {
-        format!("{}", " ".repeat(amount)).reset()
+        let reset_color = Color::Rgb { r: 22, g: 22, b: 23 };
+        format!("{}", " ".repeat(amount)).on(reset_color.clone())
     }
 }

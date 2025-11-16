@@ -82,7 +82,13 @@ impl Editor {
             let file_type = &path[file_type_index + 1..];
 
             self.highlighter.init(file_type.to_string());
-        } 
+        }
+
+        let status = self.ui.get_mut::<StatusBar>();
+
+        if let Some(status) = status {
+            status.file = path.to_string().clone();
+        }
 
         Ok(())
     }
@@ -113,7 +119,12 @@ impl Editor {
                     break;
                 }
             }
+            let status = self.ui.get_mut::<StatusBar>();
 
+            if let Some(status) = status {
+                status.pos = self.buffer.cursor.clone();
+                status.mode = self.mode.clone();
+            }
 
             self.renderer.begin_frame();
             self.renderer.draw_buffer(&mut self.buffer, &self.ui, &mut self.highlighter, &self.mode, &self.plugins.config);

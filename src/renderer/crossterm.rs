@@ -86,6 +86,11 @@ impl CrossTermRenderer {
     }
 
     fn textfield(&mut self, buffer: &Buffer, highlighter: &mut Highlighter, config: &Config) -> io::Result<()> {
+        // TODO: Make colors be based on current theme
+        let bg = Color::Rgb { r: 22, g: 22, b: 23 };
+        let fg = Color::Rgb { r: 201, g: 199, b: 205 };
+        let line_color = Color::Rgb { r: 68, g: 68, b: 72 };
+
         for row in 0..(self.size.rows - 1) {
             let line = buffer.get_at(row as usize);
             let mut current_render_line = RenderLine { 
@@ -95,7 +100,7 @@ impl CrossTermRenderer {
                 ]
             };
             if line.is_none() {
-                let empty = "    ∼ ".to_string().on(Color::Reset).dark_grey();
+                let empty = "    ∼ ".to_string().on(bg.clone()).with(line_color.clone());
                 for (index, char) in empty.content().chars().enumerate() {
                     current_render_line.cells[index] = RenderCell { ch: char.to_string(), style: empty.style().clone() };
                 }
@@ -111,9 +116,9 @@ impl CrossTermRenderer {
                     let signed_scroll_offset = buffer.scroll_offset.vertical as i16;
                     let relative_distance = (current_line - (signed_row + signed_scroll_offset)).abs();
                     if current_line == signed_row + signed_scroll_offset { 
-                        line_number = format!("{:5} ", current_line).reset();
+                        line_number = format!("{:5} ", current_line).on(bg.clone()).with(fg.clone());
                     } else {
-                        line_number = format!("{:5} ", relative_distance).on(Color::Reset).dark_grey();
+                        line_number = format!("{:5} ", relative_distance).on(bg.clone()).with(line_color.clone());
                     }
                 } else {
                     if current_line == row as i16 + buffer.scroll_offset.vertical as i16 + 1 {
@@ -129,7 +134,7 @@ impl CrossTermRenderer {
             let style = line_number.style();
             let mut current_render_line = RenderLine { 
                 cells: vec![
-                    RenderCell { ch: " ".to_string(), style: ContentStyle::new().reset() };
+                    RenderCell { ch: " ".to_string(), style: ContentStyle::new().on(bg.clone()) };
                     self.size.cols as usize
                 ]
 
@@ -173,8 +178,8 @@ impl CrossTermRenderer {
                     }
 
                     let style = ContentStyle::new()
-                        .on(Color::Reset)
-                        .with(token.style.unwrap_or(Color::Rgb { r: 230, g: 225, b: 233 }));
+                        .on(bg.clone())
+                        .with(token.style.unwrap_or(fg.clone()));
 
                     // Draw the first cell
                     if screen_col + 6 < self.size.cols as usize {
