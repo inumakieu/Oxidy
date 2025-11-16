@@ -142,7 +142,7 @@ impl Buffer {
 
         if (self.cursor.row as i16) >= self.scroll_offset.vertical as i16 { return }
         
-        self.scroll_down();
+        self.scroll_up();
     }
 
     pub fn move_down(&mut self) {
@@ -152,7 +152,7 @@ impl Buffer {
 
         if self.cursor.row < (self.size.rows as usize - 1) + self.scroll_offset.vertical { return }
 
-        self.scroll_up();
+        self.scroll_down();
     }
 
     pub fn move_left(&mut self) {
@@ -178,15 +178,21 @@ impl Buffer {
     }
 
     pub fn scroll_down(&mut self) {
-        if self.scroll_offset.vertical + self.cursor.row >= self.lines.len() { return }
-
+        if self.scroll_offset.vertical >= self.lines.len() - 2 { return }
+        
         self.scroll_offset.vertical += 1;
+        if self.scroll_offset.vertical > self.cursor.row {
+            self.cursor.row += 1;
+        }
     }
 
     pub fn scroll_up(&mut self) {
         if self.scroll_offset.vertical == 0 { return }
 
         self.scroll_offset.vertical -= 1;
+        if self.scroll_offset.vertical + (self.size.rows as usize - 2) < self.cursor.row {
+            self.cursor.row -= 1;
+        }
     }
 
     pub fn jump_to(&mut self, loc: BufferLocation) {

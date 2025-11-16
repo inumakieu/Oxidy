@@ -70,7 +70,7 @@ impl UiElement for Card {
         let padding = 1;
         
         let lines = self.get_lines(max_width - 2 - (padding * 2));
-        let width = max_width;
+        let width = lines[0].len().min(max_width) + (padding * 2) + 2;
         let height = (lines.len() + 2).clamp(3, max_height);
         let offset = frame[0].cells.len() - width - 1;
         let style = self.card_type.style();
