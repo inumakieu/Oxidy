@@ -3,6 +3,7 @@
 use std::io::{self, Read};
 use std::sync::Arc;
 use std::fs::File;
+use std::time::Duration;
 
 use crate::buffer::Buffer;
 use crate::input::{EditorCommand, InputHandler};
@@ -15,7 +16,22 @@ use crate::highlighter::Highlighter;
 use crate::ui::command::Command;
 use crate::ui::status_bar::StatusBar;
 use crate::ui::ui_manager::UiManager;
+use crate::ui::card::Card;
+use crate::log_manager::LogManager;
 
+#[macro_export]
+macro_rules! elog {
+    ($editor:expr, $($arg:tt)*) => {{
+        $editor.logs.push_persistent(format!($($arg)*));
+    }};
+}
+
+#[macro_export]
+macro_rules! notify {
+    ($editor:expr, $duration:expr, $($arg:tt)*) => {{
+        $editor.logs.push_notification(format!($($arg)*), $duration);
+    }};
+}
 
 pub struct Editor {
     pub mode: EditorMode,
@@ -29,7 +45,8 @@ pub struct Editor {
     pub input: Box<dyn InputHandler>,
     pub plugins: PluginManager,
     pub highlighter: Highlighter,
-    pub lsp: Option<LspService>
+    pub lsp: Option<LspService>,
+    pub logs: LogManager
 }
 
 impl Editor {
@@ -47,6 +64,7 @@ impl Editor {
         let command = Command::new();
         ui.add(status_bar);
         ui.add(command);
+        ui.add(Card::new("".to_string()));
 
         let lsp = LspService::new();
 
@@ -59,7 +77,8 @@ impl Editor {
             input,
             plugins,
             highlighter,
-            lsp
+            lsp,
+            logs: LogManager::new()
         }
     }
 
@@ -113,12 +132,16 @@ impl Editor {
                     }
                     _ => {}
                 }
-            }
+            } 
+
             if let Some(cmd) = self.input.poll(&self.mode)? {
                 if self.handle_command(cmd)? == EditorEvent::Exit {
                     break;
                 }
             }
+
+            self.handle_logs();
+
             let status = self.ui.get_mut::<StatusBar>();
 
             if let Some(status) = status {
@@ -140,6 +163,8 @@ impl Editor {
             EditorCommand::MoveDown => self.buffer.move_down(),
             EditorCommand::MoveLeft => self.buffer.move_left(),
             EditorCommand::MoveRight => self.buffer.move_right(),
+            EditorCommand::ScrollDown => self.buffer.scroll_down(),
+            EditorCommand::ScrollUp => self.buffer.scroll_up(),
             EditorCommand::JumpTo(loc) => self.buffer.jump_to(loc),
             EditorCommand::InsertChar(c) => self.buffer.insert_char(c),
             EditorCommand::InsertCommandChar(c) => {
@@ -209,6 +234,8 @@ impl Editor {
                         self.with_lsp(|lsp| {
                             lsp.initialize(&root_uri);
                         });
+
+                        notify!(self, Duration::from_secs(3), "Rust analyzer was started successfully.");
                     }, // TODO: Make it spawn lsp specified
                     _ => {}
                 }
@@ -225,6 +252,47 @@ impl Editor {
             _ => {}
         }
         Ok(EditorEvent::None)
+    }
+
+    fn handle_logs(&mut self) {
+        let active_notifications = self.logs.drain_notifications();
+        let new_persistent_logs = self.logs.drain_persistent();
+
+        match active_notifications.get(0) {
+            Some(notif) => {
+                let mut card = self.ui.get_mut::<Card>();
+
+                if let Some(card) = card {
+                    card.update(notif.clone());
+                }
+            }
+            None => {
+                let mut card = self.ui.get_mut::<Card>();
+
+                if let Some(card) = card {
+                    card.update("".to_string());
+                }
+            }
+        }
+
+        /*
+        match new_persistent_logs.get(0) {
+            Some(log) => {
+                let mut card = self.ui.get_mut::<Card>();
+
+                if let Some(card) = card {
+                    card.update(log.clone());
+                }
+            }
+            None => {
+                let mut card = self.ui.get_mut::<Card>();
+
+                if let Some(card) = card {
+                    card.update("".to_string());
+                }
+            }
+        }
+        */
     }
 
     fn with_lsp<F>(&mut self, f: F)

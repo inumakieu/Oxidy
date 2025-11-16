@@ -13,6 +13,7 @@ pub mod renderer;
 pub mod input;
 pub mod services;
 pub mod ui;
+pub mod log_manager;
 
 use crossterm::cursor;
 use crossterm::terminal;

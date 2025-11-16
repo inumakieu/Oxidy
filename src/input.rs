@@ -1,6 +1,6 @@
 use std::{io, time::Duration};
 
-use crossterm::event::{poll, read, Event, KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{poll, read, Event, KeyCode, KeyEvent, KeyModifiers, MouseEventKind};
 
 use crate::{buffer::BufferLocation, types::EditorMode};
 
@@ -9,6 +9,8 @@ pub enum EditorCommand {
     MoveDown,
     MoveLeft,
     MoveRight,
+    ScrollDown,
+    ScrollUp,
     JumpTo(BufferLocation),
     InsertChar(char),
     InsertCommandChar(char),
@@ -34,6 +36,17 @@ impl InputHandler for CrosstermInput {
         if poll(Duration::from_millis(0))? {
             match read()? {
                 Event::Key(e) => Ok(Some(self.translate_key_event(e, mode))),
+                Event::Mouse(e) => {
+                    match e.kind {
+                        MouseEventKind::ScrollDown => {
+                            Ok(Some(EditorCommand::ScrollDown))
+                        }
+                        MouseEventKind::ScrollUp => {
+                            Ok(Some(EditorCommand::ScrollUp))
+                        }
+                        _ => { Ok(None) }
+                    }
+                }
                 _ => Ok(None),
             }
         } else {

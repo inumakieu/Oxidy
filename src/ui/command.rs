@@ -4,8 +4,6 @@ use crossterm::style::{Color, Stylize};
 
 use crate::{types::{RenderCell, RenderLine}, ui::ui_element::UiElement};
 
-
-
 pub struct Command {
     pub command: String,
     pub shown: bool,
