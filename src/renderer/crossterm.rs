@@ -108,7 +108,7 @@ impl CrossTermRenderer {
                 let line_number: StyledContent<String>;
                 if config.opt.relative_numbers {
                     let signed_row = row as i16 + 1;
-                    let signed_scroll_offset = buffer.scroll_offset as i16;
+                    let signed_scroll_offset = buffer.scroll_offset.vertical as i16;
                     let relative_distance = (current_line - (signed_row + signed_scroll_offset)).abs();
                     if current_line == signed_row + signed_scroll_offset { 
                         line_number = format!("{:5} ", current_line).reset();
@@ -116,10 +116,10 @@ impl CrossTermRenderer {
                         line_number = format!("{:5} ", relative_distance).on(Color::Reset).dark_grey();
                     }
                 } else {
-                    if current_line == row as i16 + buffer.scroll_offset as i16 + 1 {
-                        line_number = format!("{:5} ", row as usize + buffer.scroll_offset + 1).on(Color::Reset).white();
+                    if current_line == row as i16 + buffer.scroll_offset.vertical as i16 + 1 {
+                        line_number = format!("{:5} ", row as usize + buffer.scroll_offset.vertical + 1).on(Color::Reset).white();
                     } else {
-                        line_number = format!("{:5} ", row as usize + buffer.scroll_offset + 1).on(Color::Reset).dark_grey();
+                        line_number = format!("{:5} ", row as usize + buffer.scroll_offset.vertical + 1).on(Color::Reset).dark_grey();
 
                     }
                 }
@@ -151,28 +151,50 @@ impl CrossTermRenderer {
                 col += width;
             }
 
-            let styled_line = highlighter.highlight(line.unwrap().as_str(), row as usize + buffer.scroll_offset);
+            let styled_line = highlighter.highlight(line.unwrap().as_str(), row as usize + buffer.scroll_offset.vertical);
             for token in styled_line {
-                let mut col = 6 + token.offset; // still okay if offset is character-based
+                let mut logical_col = token.offset; // where it *really* is in the file
+
                 for g in token.text.graphemes(true) {
                     let width = UnicodeWidthStr::width(g) as usize;
-                    if col >= self.size.cols as usize { break; }
+
+                    // Skip until we reach the scrolled position
+                    if logical_col + width <= buffer.scroll_offset.horizontal {
+                        logical_col += width;
+                        continue;
+                    }
+
+                    // Convert logical column to screen column
+                    let screen_col = logical_col - buffer.scroll_offset.horizontal;
+
+                    // Stop if out of screen
+                    if screen_col + 6 >= self.size.cols as usize {
+                        break;
+                    }
 
                     let style = ContentStyle::new()
                         .on(Color::Reset)
                         .with(token.style.unwrap_or(Color::Rgb { r: 230, g: 225, b: 233 }));
 
-                    current_render_line.cells[col] = RenderCell { ch: g.to_string(), style: style.clone() };
+                    // Draw the first cell
+                    if screen_col + 6 < self.size.cols as usize {
+                        current_render_line.cells[screen_col + 6] =
+                            RenderCell { ch: g.to_string(), style: style.clone() };
+                    }
 
+                    // Draw padding for full-width graphemes
                     for i in 1..width {
-                        if col + i < self.size.cols as usize {
-                            current_render_line.cells[col + i] = RenderCell { ch: " ".to_string(), style: style.clone() };
+                        let sc = screen_col + i;
+                        if sc + 6 < self.size.cols as usize {
+                            current_render_line.cells[sc + 6] =
+                                RenderCell { ch: " ".to_string(), style: style.clone() };
                         }
                     }
 
-                    col += width;
+                    logical_col += width;
                 }
             }
+
 
             self.render_buffer.current[row as usize + 1] = current_render_line;
         }
@@ -241,9 +263,9 @@ impl Renderer for CrossTermRenderer {
             EditorMode::INSERT |
             EditorMode::NORMAL => {
                 if let Some(checked_row) = checked_row {
-                    let _ = self.output.queue(MoveTo(6 + buffer.cursor.col as u16, checked_row as u16 + 1));
+                    let _ = self.output.queue(MoveTo(6 + (buffer.cursor.col - buffer.scroll_offset.horizontal) as u16, checked_row as u16 + 1));
                 } else {
-                    let _ = self.output.queue(MoveTo(6 + buffer.cursor.col as u16, 1));
+                    let _ = self.output.queue(MoveTo(6 + (buffer.cursor.col - buffer.scroll_offset.horizontal) as u16, 1));
                 }  
             }
             EditorMode::COMMAND => {

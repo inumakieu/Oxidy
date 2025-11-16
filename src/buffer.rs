@@ -16,10 +16,16 @@ pub struct Cursor {
 }
 
 #[derive(Debug, Clone)]
+pub struct ScrollOffset {
+    pub horizontal: usize,
+    pub vertical: usize,
+}
+
+#[derive(Debug, Clone)]
 pub struct Buffer {
     pub lines: Vec<String>,
     pub cursor: Cursor,
-    pub scroll_offset: usize,
+    pub scroll_offset: ScrollOffset,
     pub size: Size,
     pub path: String
 }
@@ -29,7 +35,7 @@ impl Buffer {
         Self {
             lines: Vec::new(),
             cursor: Cursor { row: 0, col: 0 },
-            scroll_offset: 0,
+            scroll_offset: ScrollOffset { horizontal: 0, vertical: 0 },
             size,
             path: "".to_string()
         }
@@ -45,7 +51,7 @@ impl Buffer {
     }
 
     pub fn get_at(&self, row: usize) -> Option<String> {
-        self.lines.get(row + self.scroll_offset).cloned()
+        self.lines.get(row + self.scroll_offset.vertical).cloned()
     }
 
     pub fn insert_char(&mut self, c: char) {
@@ -125,6 +131,7 @@ impl Buffer {
         if let Some(line) = self.lines.get(self.cursor.row) {
             self.cursor.col = self.cursor.col.clamp(0, line.len());
         }
+        if self.lines.is_empty() { return }
         self.cursor.row = self.cursor.row.clamp(0, self.lines.len() - 1);
     }
 
@@ -133,9 +140,9 @@ impl Buffer {
 
         self.cursor.row -= 1;
 
-        if (self.cursor.row as i16) >= self.scroll_offset as i16 { return }
+        if (self.cursor.row as i16) >= self.scroll_offset.vertical as i16 { return }
 
-        self.scroll_offset -= 1;
+        self.scroll_offset.vertical -= 1;
     }
 
     pub fn move_down(&mut self) {
@@ -143,15 +150,19 @@ impl Buffer {
 
         self.cursor.row += 1;
 
-        if self.cursor.row < (self.size.rows as usize - 1) + self.scroll_offset { return }
+        if self.cursor.row < (self.size.rows as usize - 1) + self.scroll_offset.vertical { return }
 
-        self.scroll_offset += 1;
+        self.scroll_offset.vertical += 1;
     }
 
     pub fn move_left(&mut self) {
         if self.cursor.col == 0 { return }
 
         self.cursor.col -= 1;
+
+        if (self.cursor.col as i16) >= self.scroll_offset.horizontal as i16 { return }
+
+        self.scroll_offset.horizontal -= 1;
     }
 
     pub fn move_right(&mut self) {
@@ -159,6 +170,10 @@ impl Buffer {
             if self.cursor.col == line.len() { return }
 
             self.cursor.col += 1;
+
+            if self.cursor.col < (self.size.cols as usize - 6) + self.scroll_offset.horizontal { return }
+
+            self.scroll_offset.horizontal += 1; 
         }
     }
 
@@ -166,12 +181,12 @@ impl Buffer {
         match loc {
             BufferLocation::Top => {
                 self.cursor.row = 0;
-                self.scroll_offset = 0;
+                self.scroll_offset.vertical = 0;
                 
             }
             BufferLocation::Bottom => {
                 self.cursor.row = self.lines.len() - 1;
-                self.scroll_offset = self.cursor.row - (self.size.rows as usize - 1);
+                self.scroll_offset.vertical = self.cursor.row - (self.size.rows as usize - 1);
             }
             BufferLocation::StartLine => {
                 if let Some(line) = self.lines.get(self.cursor.row) {
@@ -202,6 +217,6 @@ impl Buffer {
     }
 
     pub fn checked_row(&self) -> Option<usize> {
-        return self.cursor.row.checked_sub(self.scroll_offset);
+        return self.cursor.row.checked_sub(self.scroll_offset.vertical);
     }
 }
