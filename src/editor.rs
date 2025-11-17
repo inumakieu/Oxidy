@@ -212,7 +212,13 @@ impl Editor {
                 match self.command.as_str() {
                     "q" => return Ok(EditorEvent::Exit),
                     "w" => {
-                        self.plugins.save_buffer(&self.buffer);
+                        let result = self.plugins.save_buffer(&self.buffer);
+                        match result {
+                            Ok(_) => notify!(self, Duration::from_secs(3), "{} was written successfully.", &self.buffer.path),
+                            Err(error) => {
+                                notify!(self, Duration::from_secs(3), "Writing failed: {}", error);
+                            }
+                        }                   
                         return Ok(EditorEvent::Save)
                     }
                     theme if theme.contains("theme ") => {
@@ -247,7 +253,9 @@ impl Editor {
                     command.command = self.command.clone();
                 }
             }
-            EditorCommand::Save => self.plugins.save_buffer(&self.buffer),
+            EditorCommand::Save => {
+                self.plugins.save_buffer(&self.buffer); 
+            }
             EditorCommand::Quit => return Ok(EditorEvent::Exit),
             _ => {}
         }

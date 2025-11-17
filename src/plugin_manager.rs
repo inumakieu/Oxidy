@@ -1,5 +1,5 @@
 use std::{
-    fs::{write, File}, io::{Read, Result}, path::PathBuf, sync::mpsc::{self, Receiver}, thread
+    fs::{write, File}, io::{self, Read, Result}, path::PathBuf, sync::mpsc::{self, Receiver}, thread
 };
 use std::sync::{Arc, Mutex};
 use crossterm::style::Color;
@@ -22,11 +22,106 @@ pub struct Options {
     pub natural_scroll: bool,
     pub tab_size: usize
 }
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct Theme {
+    pub Background: String,
+    pub Foreground: String,
+    
+    pub Comment: String,
+
+    pub Namespace: String,
+    pub Type: String,
+    pub Class: String,
+    pub Struct: String,
+    pub Enum: String,
+    pub Interface: String,
+    pub TypeParameter: String,
+
+    pub Variable: String,
+    pub Parameter: String,
+    pub Property: String,
+    pub EnumMember: String,
+
+    pub Function: String,
+    pub Method: String,
+    pub Macro: String,
+    pub Event: String,
+
+    pub Keyword: String,
+    pub Modifier: String,
+    pub Operator: String,
+
+    pub String: String,
+    pub Number: String,
+    pub Regexp: String
+}
+
+impl Theme {
+    pub fn to_map(&self) -> HashMap<String, Color> {
+        let mut map = HashMap::new();
+
+        macro_rules! add {
+            ($field:ident) => {
+                {
+                    let key = {
+                        let s = stringify!($field);
+                        let mut chars = s.chars();
+                        match chars.next() {
+                            Some(first) => first.to_ascii_lowercase().to_string() + chars.as_str(),
+                            None => String::new(),
+                        }
+                    };
+
+                    let hex = self.$field.trim_start_matches('#');
+                    let r = u8::from_str_radix(&hex[0..2], 16).unwrap_or_default();
+                    let g = u8::from_str_radix(&hex[2..4], 16).unwrap_or_default();
+                    let b = u8::from_str_radix(&hex[4..6], 16).unwrap_or_default();
+
+                    map.insert(key, Color::Rgb { r, g, b });
+                }
+            };
+        }
+
+        add!(Background);
+        add!(Foreground);
+        add!(Comment);
+
+        add!(Namespace);
+        add!(Type);
+        add!(Class);
+        add!(Struct);
+        add!(Enum);
+        add!(Interface);
+        add!(TypeParameter);
+
+        add!(Variable);
+        add!(Parameter);
+        add!(Property);
+        add!(EnumMember);
+
+        add!(Function);
+        add!(Method);
+        add!(Macro);
+        add!(Event);
+
+        add!(Keyword);
+        add!(Modifier);
+        add!(Operator);
+
+        add!(String);
+        add!(Number);
+        add!(Regexp);
+
+        map
+    }
+}
+
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct Config {
     pub opt: Options,
-    pub theme: String
+    pub theme: String,
+    pub themes: HashMap<String, Theme>
 }
 
 pub struct PluginManager {
@@ -38,8 +133,8 @@ pub struct PluginManager {
     pub current_lang: Arc<Mutex<Option<String>>>,
 
     pub rx: Option<Receiver<Event>>,
-    pub themes: Arc<Mutex<HashMap<String, HashMap<String, Color>>>>,
-    pub current_theme: Arc<Mutex<Option<String>>>,
+    // pub themes: Arc<Mutex<HashMap<String, HashMap<String, Color>>>>,
+    // pub current_theme: Arc<Mutex<Option<String>>>,
 }
 
 impl PluginManager {
@@ -50,7 +145,8 @@ impl PluginManager {
                 natural_scroll: false,
                 tab_size: 2
             },
-            theme: "".to_string()
+            theme: "".to_string(),
+            themes: HashMap::new()
         };
 
         let mut config_path = dirs::home_dir().expect("Could not find home directory.");
@@ -70,9 +166,7 @@ impl PluginManager {
         
         let ret: Self;
         let current_lang: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
-        let themes = Arc::new(Mutex::new(HashMap::new()));
-        let current_theme = Arc::new(Mutex::new(None));
-
+                
         if let Ok(mut config_file) = config_file {
             let mut config_string = String::new();
             config_file.read_to_string(&mut config_string).unwrap();
@@ -87,8 +181,8 @@ impl PluginManager {
                 syntax: Arc::new(Mutex::new(HashMap::new())),
                 current_lang,
                 rx: None,
-                themes,
-                current_theme
+                // themes,
+                // current_theme
             }
         } else {
             let ast = engine.compile("").unwrap();
@@ -100,8 +194,8 @@ impl PluginManager {
                 syntax: Arc::new(Mutex::new(HashMap::new())),
                 current_lang,
                 rx: None,
-                themes,
-                current_theme
+                // themes,
+                // current_theme
             }
         }
 
@@ -199,8 +293,6 @@ impl PluginManager {
         scope.set_value("oxidy", oxidy_config_struct);
         
         self.syntax();
-
-        self.theme();
         
         let _ = self.engine.eval_ast_with_scope::<()>(&mut scope, &self.ast);
 
@@ -209,51 +301,12 @@ impl PluginManager {
     }
 
     pub fn get_current_theme_colors(&self) -> Option<HashMap<String, Color>> {
-        let themes = self.themes.lock().unwrap();
+        let themes = self.config.themes.clone();
         if let Some(colors) = themes.get(&self.config.theme) {
-            return Some(colors.clone())
+            return Some(colors.to_map())
         }
 
         None
-    }
-
-    fn theme(&mut self) {
-        {
-            let themes_map = self.themes.clone();         // Arc<Mutex<HashMap<String, HashMap<String, String>>>>
-            let current_theme = self.current_theme.clone(); // Arc<Mutex<Option<String>>>
-            self.engine.register_fn("set_color", move |key: String, value: String| {
-                // read lang, then drop the lock
-                let theme = {
-                    let guard = current_theme.lock().unwrap();
-                    guard.clone() // Option<String>
-                }.expect("set_color called outside of a color(...) block");
-
-                // write into syntax[lang][key] = value, creating the maps if needed
-                let mut all = themes_map.lock().unwrap();
-                let hex = value.trim_start_matches('#');
-                let r = u8::from_str_radix(&hex[0..2], 16).unwrap_or_default();
-                let g = u8::from_str_radix(&hex[2..4], 16).unwrap_or_default();
-                let b = u8::from_str_radix(&hex[4..6], 16).unwrap_or_default();
-
-                all.entry(theme).or_default().insert(key, Color::Rgb { r, g, b });
-            });
-        }
-
-        {
-            let current_theme = self.current_theme.clone(); 
-
-            self.engine.register_fn("theme", move |ctx: NativeCallContext, name: &str, callback: FnPtr| {
-                {
-                    let mut slot = current_theme.lock().unwrap();
-                    *slot = Some(name.to_string());
-                }
-                let _: () = callback.call_within_context(
-                    &ctx, 
-                    ()
-                ).unwrap();
-            });
-        }
-
     }
 
     fn syntax(&mut self) {
@@ -289,9 +342,9 @@ impl PluginManager {
         }
     }
 
-    pub fn save_buffer(&self, buffer: &Buffer) {
+    pub fn save_buffer(&self, buffer: &Buffer) -> io::Result<()> {
         let content = buffer.lines.join("\n");
-        let _ = write(buffer.path.clone(), content);
+        write(buffer.path.clone(), content)
     }
 }
 
