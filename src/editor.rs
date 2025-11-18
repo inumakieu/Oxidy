@@ -8,7 +8,7 @@ use std::time::Duration;
 use crate::buffer::Buffer;
 use crate::input::{EditorCommand, InputHandler};
 
-use crate::plugin_manager::PluginManager;
+use crate::plugins::plugin_manager::PluginManager;
 use crate::renderer::Renderer;
 use crate::services::lsp_service::{LspService, LspServiceEvent};
 use crate::types::{EditorEvent, EditorMode, Size};
@@ -175,7 +175,7 @@ impl Editor {
                     command.command = self.command.clone();
                 }
             }
-            EditorCommand::Tab => self.buffer.insert_tab(&self.plugins.config.opt.tab_size),
+            EditorCommand::Tab => self.buffer.insert_tab(&self.plugins.config.opt.tab_size.unwrap()),
             EditorCommand::Enter => self.buffer.insert_newline(),
             EditorCommand::ChangeMode(mode) => {
                 self.mode = mode;
@@ -224,7 +224,7 @@ impl Editor {
                     theme if theme.contains("theme ") => {
                         let split: Vec<&str> = theme.split_whitespace().collect();
                         let name = split[1];
-                        self.plugins.config.theme = name.to_string();
+                        self.plugins.config.theme = Some(name.to_string());
 
                         let colors = self.plugins.get_current_theme_colors().unwrap_or(self.highlighter.colors.clone());
                         if let Some(lsp) = self.lsp.as_mut() {

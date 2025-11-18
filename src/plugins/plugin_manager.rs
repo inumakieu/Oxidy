@@ -4,125 +4,12 @@ use std::{
 use std::sync::{Arc, Mutex};
 use crossterm::style::Color;
 use notify::{Event, EventKind, RecursiveMode, Watcher};
-use rhai::{module_resolvers::FileModuleResolver, serde::{from_dynamic, to_dynamic}, Dynamic, Engine, EvalAltResult, FnPtr, NativeCallContext, Scope};
-use serde::{Deserialize, Serialize};
+use rhai::{module_resolvers::FileModuleResolver, serde::{from_dynamic, to_dynamic}, Dynamic, Engine, FnPtr, NativeCallContext, Scope};
+
 use std::collections::HashMap;
 
 use crate::buffer::Buffer;
-
-#[derive(Clone, Serialize, Deserialize, Debug)]
-pub struct ColorStyle {
-    pub fg: String,
-    pub bg: String,
-}
-
-#[derive(Clone, Serialize, Deserialize, Debug)]
-pub struct Options {
-    pub relative_numbers: bool,
-    pub natural_scroll: bool,
-    pub tab_size: usize
-}
-#[derive(Clone, Serialize, Deserialize, Debug)]
-pub struct Theme {
-    pub Background: String,
-    pub Foreground: String,
-    
-    pub Comment: String,
-
-    pub Namespace: String,
-    pub Type: String,
-    pub Class: String,
-    pub Struct: String,
-    pub Enum: String,
-    pub Interface: String,
-    pub TypeParameter: String,
-
-    pub Variable: String,
-    pub Parameter: String,
-    pub Property: String,
-    pub EnumMember: String,
-
-    pub Function: String,
-    pub Method: String,
-    pub Macro: String,
-    pub Event: String,
-
-    pub Keyword: String,
-    pub Modifier: String,
-    pub Operator: String,
-
-    pub String: String,
-    pub Number: String,
-    pub Regexp: String
-}
-
-impl Theme {
-    pub fn to_map(&self) -> HashMap<String, Color> {
-        let mut map = HashMap::new();
-
-        macro_rules! add {
-            ($field:ident) => {
-                {
-                    let key = {
-                        let s = stringify!($field);
-                        let mut chars = s.chars();
-                        match chars.next() {
-                            Some(first) => first.to_ascii_lowercase().to_string() + chars.as_str(),
-                            None => String::new(),
-                        }
-                    };
-
-                    let hex = self.$field.trim_start_matches('#');
-                    let r = u8::from_str_radix(&hex[0..2], 16).unwrap_or_default();
-                    let g = u8::from_str_radix(&hex[2..4], 16).unwrap_or_default();
-                    let b = u8::from_str_radix(&hex[4..6], 16).unwrap_or_default();
-
-                    map.insert(key, Color::Rgb { r, g, b });
-                }
-            };
-        }
-
-        add!(Background);
-        add!(Foreground);
-        add!(Comment);
-
-        add!(Namespace);
-        add!(Type);
-        add!(Class);
-        add!(Struct);
-        add!(Enum);
-        add!(Interface);
-        add!(TypeParameter);
-
-        add!(Variable);
-        add!(Parameter);
-        add!(Property);
-        add!(EnumMember);
-
-        add!(Function);
-        add!(Method);
-        add!(Macro);
-        add!(Event);
-
-        add!(Keyword);
-        add!(Modifier);
-        add!(Operator);
-
-        add!(String);
-        add!(Number);
-        add!(Regexp);
-
-        map
-    }
-}
-
-
-#[derive(Clone, Serialize, Deserialize, Debug)]
-pub struct Config {
-    pub opt: Options,
-    pub theme: String,
-    pub themes: HashMap<String, Theme>
-}
+use crate::plugins::config::Config;
 
 pub struct PluginManager {
     pub engine: Engine,
@@ -139,15 +26,7 @@ pub struct PluginManager {
 
 impl PluginManager {
     pub fn new() -> Self {
-        let config = Config {
-            opt: Options {
-                relative_numbers: false,
-                natural_scroll: false,
-                tab_size: 2
-            },
-            theme: "".to_string(),
-            themes: HashMap::new()
-        };
+        let config = Config::default();
 
         let mut config_path = dirs::home_dir().expect("Could not find home directory.");
         config_path.push(".config/oxidy/config.rhai");
@@ -297,13 +176,17 @@ impl PluginManager {
         let _ = self.engine.eval_ast_with_scope::<()>(&mut scope, &self.ast);
 
         let script_result: Dynamic = self.engine.eval_with_scope(&mut scope, "oxidy").unwrap();
-        self.config = from_dynamic(&script_result).unwrap();
+        let conf: Config = from_dynamic(&script_result).unwrap();
+
+        self.config = conf.merge(&self.config);
     }
 
     pub fn get_current_theme_colors(&self) -> Option<HashMap<String, Color>> {
         let themes = self.config.themes.clone();
-        if let Some(colors) = themes.get(&self.config.theme) {
-            return Some(colors.to_map())
+        let current_theme = self.config.theme.clone().unwrap();
+        if let Some(colors) = themes.get(&current_theme) {
+            let merged = colors.merge(&colors.default());
+            return Some(merged.to_map())
         }
 
         None

@@ -6,7 +6,7 @@ use std::panic;
 pub mod types;
 pub mod highlighter;
 pub mod editor;
-pub mod plugin_manager;
+pub mod plugins;
 pub mod lsp;
 pub mod buffer;
 pub mod renderer;
@@ -14,6 +14,7 @@ pub mod input;
 pub mod services;
 pub mod ui;
 pub mod log_manager;
+pub mod command;
 
 use crossterm::cursor;
 use crossterm::terminal;
@@ -22,7 +23,6 @@ use crossterm::ExecutableCommand;
 use editor::Editor;
 
 use crate::input::CrosstermInput;
-use crate::plugin_manager::PluginManager;
 use crate::renderer::crossterm::CrossTermRenderer;
 use crate::types::Size;
 

@@ -10,7 +10,7 @@ use unicode_width::UnicodeWidthStr;
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::highlighter::Highlighter;
-use crate::plugin_manager::Config;
+use crate::plugins::config::Config;
 use crate::renderer::Renderer;
 use crate::buffer::Buffer;
 use crate::types::{EditorMode, RenderBuffer, RenderCell, RenderLine, Size};
@@ -111,7 +111,7 @@ impl CrossTermRenderer {
             let line_number = {
                 let current_line = buffer.cursor.row as i16 + 1;
                 let line_number: StyledContent<String>;
-                if config.opt.relative_numbers {
+                if config.opt.relative_numbers.unwrap() {
                     let signed_row = row as i16 + 1;
                     let signed_scroll_offset = buffer.scroll_offset.vertical as i16;
                     let relative_distance = (current_line - (signed_row + signed_scroll_offset)).abs();

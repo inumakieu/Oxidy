@@ -2,7 +2,7 @@ pub mod crossterm;
 
 use crate::buffer::Buffer;
 use crate::highlighter::Highlighter;
-use crate::plugin_manager::Config;
+use crate::plugins::config::Config;
 use crate::types::{EditorMode, Size};
 use crate::ui::ui_manager::UiManager;
 
