@@ -20,6 +20,8 @@ impl CommandManager {
         Self { commands: HashMap::new() }
     }
 
+    pub fn register_commands(&mut self) {}
+
     pub fn register(&mut self, cmd: Command) {
         self.commands.insert(cmd.name.clone(), cmd);
     }

@@ -38,8 +38,8 @@ pub struct Theme {
     pub Regexp: Option<String>
 }
 
-impl Theme {
-    pub fn default(&self) -> Self {
+impl Default for Theme {
+    fn default() -> Self {
         Self {
             Background:      Some("#161617".to_string()),
             Foreground:      Some("#c9c7cd".to_string()),
@@ -72,7 +72,9 @@ impl Theme {
             Regexp:          Some("#e29eca".to_string())
         }
     }
+}
 
+impl Theme {
     pub fn to_map(&self) -> HashMap<String, Color> {
         let mut map = HashMap::new();
 
@@ -165,5 +167,23 @@ impl Theme {
             Number: self.Number.clone().or(base.Number.clone()),
             Regexp: self.Regexp.clone().or(base.Regexp.clone()),
         }
+    }
+
+    pub fn background(&self) -> Color {
+        let hex = self.Background.as_ref().unwrap().trim_start_matches('#');
+        let r = u8::from_str_radix(&hex[0..2], 16).unwrap_or_default();
+        let g = u8::from_str_radix(&hex[2..4], 16).unwrap_or_default();
+        let b = u8::from_str_radix(&hex[4..6], 16).unwrap_or_default();
+
+        Color::Rgb { r, g, b }
+    }
+
+    pub fn foreground(&self) -> Color {
+        let hex = self.Foreground.as_ref().unwrap().trim_start_matches('#');
+        let r = u8::from_str_radix(&hex[0..2], 16).unwrap_or_default();
+        let g = u8::from_str_radix(&hex[2..4], 16).unwrap_or_default();
+        let b = u8::from_str_radix(&hex[4..6], 16).unwrap_or_default();
+
+        Color::Rgb { r, g, b }
     }
 }

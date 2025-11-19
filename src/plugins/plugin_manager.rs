@@ -10,6 +10,7 @@ use std::collections::HashMap;
 
 use crate::buffer::Buffer;
 use crate::plugins::config::Config;
+use crate::plugins::theme::Theme;
 
 pub struct PluginManager {
     pub engine: Engine,
@@ -185,7 +186,7 @@ impl PluginManager {
         let themes = self.config.themes.clone();
         let current_theme = self.config.theme.clone().unwrap();
         if let Some(colors) = themes.get(&current_theme) {
-            let merged = colors.merge(&colors.default());
+            let merged = colors.merge(&Theme::default());
             return Some(merged.to_map())
         }
 

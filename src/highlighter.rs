@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use std::cell::RefCell;
 
 use crate::types::Token;
 use crossterm::style::Color;
@@ -8,16 +9,17 @@ use regex::Regex;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
+#[derive(Debug, Clone)]
 pub struct Highlighter {
     pub current_filetype: String,
-    pub rules: Arc<Mutex<HashMap<String, HashMap<String, String>>>>,
+    pub rules: HashMap<String, HashMap<String, String>>,
     pub colors: HashMap<String, Color>,
-    pub cache: HashMap<u64, Vec<Token>>,
-    pub tokens: Vec<Vec<Token>>
+    pub tokens: RefCell<Vec<Vec<Token>>>,
+    pub cache: RefCell<HashMap<u64, Vec<Token>>>
 }
 
 impl Highlighter {
-    pub fn new(rules: Arc<Mutex<HashMap<String, HashMap<String, String>>>>) -> Self {
+    pub fn new(rules: HashMap<String, HashMap<String, String>>) -> Self {
         let mut colors: HashMap<String, Color> = HashMap::new();
 
         colors.insert("bg".into(), Color::Reset);
@@ -54,8 +56,8 @@ impl Highlighter {
             current_filetype: "".to_string(),
             rules,
             colors,
-            cache: HashMap::new(),
-            tokens: Vec::new(),
+            cache: RefCell::new(HashMap::new()),
+            tokens: RefCell::new(Vec::new()),
         }
     }
 
@@ -69,83 +71,98 @@ impl Highlighter {
         hasher.finish()
     }
 
-    pub fn highlight(&mut self, line: &str, index: usize) -> Vec<Token> {
+    pub fn highlight(&self, line: &str, index: usize) -> Vec<Token> {
         let mut tokens: Vec<Token> = Vec::new();
 
-        if !self.tokens.is_empty() {
-            let val =  self.tokens.get(index);
-            match val {
-                Some(val) => tokens.extend(val.clone()),
-                None => {}
-            }
+        if let Some(val) = self.tokens.borrow().get(index) {
+            tokens.extend(val.clone());
         }
 
         let checksum = self.hash_bytes_default_hasher(line.as_bytes());
 
-        if let Some(cached) = self.cache.get(&checksum) {
-            tokens.extend(cached.iter().cloned());
+        if let Some(cached) = self.cache.borrow().get(&checksum) {
+            tokens.extend(cached.clone());
             return tokens;
         }
 
-        
         if line.is_empty() {
             return tokens;
         }
 
         if tokens.is_empty() {
-            let syntax_map = self.rules.lock().unwrap();
-            let rules = syntax_map.get(&self.current_filetype);
-            if rules.is_none() {
-                tokens.push(Token { text: line.to_string(), offset: 0, style: Some(self.colors["fg"].clone()) });
-                return tokens
-            }
+            if let Some(rules) = self.rules.get(&self.current_filetype) {
+                for (key, regex_source) in rules {
+                    let re = Regex::new(regex_source).unwrap();
 
-            for (key, value) in rules.unwrap().iter() {
-                let re = Regex::new(&value).unwrap();
-                
-                re.captures_iter(line)
-                    .for_each(|cap| {
+                    for cap in re.captures_iter(line) {
                         if let Some(cap) = cap.get(1) {
-                            tokens.push(Token { text: cap.as_str().to_string(), offset: cap.start(), style: Some(self.colors[key].clone()) })
+                            tokens.push(Token {
+                                text: cap.as_str().to_string(),
+                                offset: cap.start(),
+                                style: Some(self.colors[key].clone()),
+                            });
                         }
-                    });
+                    }
+                }
+            } else {
+                tokens.push(Token {
+                    text: line.to_string(),
+                    offset: 0,
+                    style: Some(self.colors["fg"].clone()),
+                });
             }
         }
 
-        let mut found: String = "".to_string();
-        let mut found_tokens: Vec<Token> = Vec::new();
-        
-        let mut index = 0;
-        while index <= line.len() - 1 {
-            if let Some(token) = tokens.iter().find(|token| token.offset == index) {
-                if !found.is_empty() {
-                    found_tokens.push(
-                        Token { text: found.clone(), offset: index - found.len(), style: Some(Color::Blue) }
-                    );
-                    found = "".to_string();
+        let mut found_tokens = Vec::new();
+        let mut buffer = String::new();
+
+        let mut i = 0;
+        while i < line.len() {
+            let is_token_start = tokens.iter().any(|t| t.offset == i);
+
+            if is_token_start {
+                if !buffer.is_empty() {
+                    let start = i - buffer.len();
+                    found_tokens.push(Token {
+                        text: buffer.clone(),
+                        offset: start,
+                        style: Some(Color::White),
+                    });
+                    buffer.clear();
                 }
-                index += token.text.len();
-                continue;
-            }
-            if let Some(char) = line.chars().nth(index) {
-                found.push(char);
+
+                if let Some(existing) = tokens.iter().find(|t| t.offset == i) {
+                    i += existing.text.len();
+                    continue;
+                }
             }
 
-            if index == line.len() - 1 {
-                found_tokens.push(
-                    Token { text: found.clone(), offset: index - (found.len() - 1), style: Some(Color::White) }
-                );
-                found = "".to_string();
+            if let Some(ch) = line.chars().nth(i) {
+                buffer.push(ch);
             }
 
-            index += 1;
-        } 
-        
+            if i == line.len() - 1 && !buffer.is_empty() {
+                let start = i + 1 - buffer.len();
+                found_tokens.push(Token {
+                    text: buffer.clone(),
+                    offset: start,
+                    style: Some(Color::White),
+                });
+            }
+
+            i += 1;
+        }
+
         tokens.extend(found_tokens);
-
         tokens.sort_by_key(|t| t.offset);
 
-        self.cache.insert(checksum, tokens.clone());
+        self.cache.borrow_mut().insert(checksum, tokens.clone());
+
         tokens
+    }
+    
+    pub fn update_tokens(&self, tokens: Vec<Vec<Token>>) {
+        *self.tokens.borrow_mut() = tokens;
+        self.cache.borrow_mut().clear();
     }
 }

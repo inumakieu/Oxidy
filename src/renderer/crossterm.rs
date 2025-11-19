@@ -11,14 +11,229 @@ use unicode_segmentation::UnicodeSegmentation;
 
 use crate::highlighter::Highlighter;
 use crate::plugins::config::Config;
-use crate::renderer::Renderer;
-use crate::buffer::Buffer;
-use crate::types::{EditorMode, RenderBuffer, RenderCell, RenderLine, Size};
+use crate::renderer::{Renderer, Layer};
+use crate::buffer::{Buffer, BufferView};
+use crate::types::{Token, EditorMode, RenderBuffer, RenderCell, RenderLine, Size, Grid};
 use crate::ui::command::Command;
 use crate::ui::ui_manager::UiManager;
+use crate::editor::Editor;
+
+pub struct GutterLayer;
+
+impl Layer for GutterLayer {
+    fn render(editor: &Editor, ui: &UiManager, config: &Config, size: Size) -> Grid<RenderCell> {
+        let mut grid = Grid::new(
+            size.rows as usize,
+            size.cols as usize,
+            RenderCell::blank()
+        );
+
+        let view = match editor.active_view() {
+            Some(v) => v,
+            None => {
+                // Empty buffer case with '~'
+                for row in 0..size.rows as usize {
+                    grid.cells[row][0] = RenderCell::space(config);
+                    grid.cells[row][1] = RenderCell::space(config);
+                    grid.cells[row][2] = RenderCell::space(config);
+                    grid.cells[row][3] = RenderCell::tilde(config);
+                    grid.cells[row][4] = RenderCell::space(config);
+                }
+                return grid;
+            }
+        };
+
+        let gutter_width = size.cols as usize;
+        let buffer = editor.buffer(&view.buffer).unwrap();
+        let total_lines = buffer.lines.len();
+
+        let scroll = view.scroll.vertical;
+        let cursor_line = view.cursor.row + scroll; // absolute line index
+
+        let use_relative = config.opt.relative_numbers.unwrap();
+
+        for screen_row in 0..size.rows as usize {
+            let buffer_row = screen_row + scroll;
+
+            if buffer_row >= total_lines {
+                // draw "~" beyond end of buffer
+                for col in 0..gutter_width {
+                    grid.cells[screen_row][col] = RenderCell::space(config);
+                }
+                grid.cells[screen_row][gutter_width - 2] = RenderCell::tilde(config);
+                continue;
+            }
+
+            // ----- COMPUTE LINE NUMBER -----
+            let line_number: i32 = if use_relative {
+                let dist = (cursor_line as i32 - buffer_row as i32).abs();
+                if dist == 0 {
+                    (buffer_row + 1) as i32       // real number for current line
+                } else {
+                    dist                         // relative for others
+                }
+            } else {
+                (buffer_row + 1) as i32
+            };
+
+            let text = format!("{:>width$} ", line_number, width = gutter_width - 1);
+
+            // ----- WRITE INTO GRID -----
+            for (i, ch) in text.chars().enumerate() {
+                grid.cells[screen_row][i] = RenderCell { ch: ch.into(), style: RenderCell::default_style(config) };
+            }
+        }
+
+        grid
+    }
+}
+
+
+pub struct TextLayer;
+
+impl TextLayer {
+    fn render_lines(
+        grid: &mut Grid<RenderCell>,
+        buffer: &Buffer,
+        view: &BufferView,
+        config: &Config,
+        size: Size,
+    ) {
+        let bg = config.current_theme().background();
+        let fg = config.current_theme().foreground();
+
+        let first_line = view.scroll.vertical;
+        let last_line  = first_line + size.rows as usize;
+
+        for screen_row in 0..size.rows as usize {
+            let buffer_row = first_line + screen_row;
+
+            // If user scrolled past EOF → blank row
+            if buffer_row >= buffer.lines.len() {
+                Self::render_empty_line(&mut grid.cells[screen_row], bg);
+                continue;
+            }
+
+            let text = &buffer.lines[buffer_row];
+
+            // highlight tokens for that line
+            let tokens = view.highlighter.highlight(text, buffer_row);
+
+            Self::render_highlighted_line(
+                &mut grid.cells[screen_row],
+                text,
+                &tokens,
+                view.scroll.horizontal,
+                config
+            );
+        }
+    }
+
+    fn render_empty_line(row: &mut [RenderCell], bg: Color) {
+        for cell in row {
+            *cell = RenderCell::blank();
+        }
+    }
+
+    fn render_highlighted_line(
+        row: &mut [RenderCell],
+        text: &str,
+        tokens: &[Token],
+        horiz_scroll: usize,
+        config: &Config
+    ) {
+        let mut col = 0;
+
+        for token in tokens {
+            let style_fg = token.style.unwrap_or(config.current_theme().foreground());
+            let style = ContentStyle::new().on(config.current_theme().background()).with(style_fg);
+
+            let mut logical_col = token.offset;
+
+            for g in token.text.graphemes(true) {
+                let width = unicode_width::UnicodeWidthStr::width(g);
+
+                if logical_col + width <= horiz_scroll {
+                    logical_col += width;
+                    continue; // skip scrolled-off characters
+                }
+
+                let screen_col = logical_col - horiz_scroll;
+
+                if screen_col >= row.len() { return; }
+
+                // draw main char
+                row[screen_col] = RenderCell::from_grapheme(g, style);
+
+                // fill extra width for wide chars
+                for i in 1..width {
+                    if screen_col + i < row.len() {
+                        row[screen_col + i] = RenderCell::space(config);
+                    }
+                }
+
+                logical_col += width;
+            }
+        }
+    }
+}
+
+
+impl Layer for TextLayer {
+    fn render(editor: &Editor, ui: &UiManager, config: &Config, size: Size) -> Grid<RenderCell> {
+        let mut grid = Grid::new(
+            size.rows as usize,
+            size.cols as usize,
+            RenderCell::blank()
+        );
+
+        let view = match editor.active_view() {
+            Some(v) => v,
+            None => return grid, // nothing open → blank text area
+        };
+
+        let buffer = editor.active_buffer();
+
+        if let Some(buffer) = buffer {
+            Self::render_lines(&mut grid, buffer, view, config, size);
+        }
+
+        grid
+    }
+}
+
+pub struct Composite;
+
+impl Composite {
+    pub fn merge(
+        gutter: &Grid<RenderCell>,
+        text: &Grid<RenderCell>,
+    ) -> Grid<RenderCell> {
+
+        let mut out = gutter.clone();
+
+        for row in 0..out.rows() {
+            out.cells[row].extend_from_slice(&text.cells[row]);
+        }
+        
+        /*
+        // apply cursor on top of text
+        apply_layer_modifications(&mut out, cursor);
+
+        // apply inline hints and ghost text
+        apply_layer_modifications(&mut out, inline);
+
+        // overlay replaces entire cells
+        apply_overlays(&mut out, overlay);
+        */
+        out
+    }
+}
+
+
 pub struct CrossTermRenderer {
     pub size: Size,
-    pub render_buffer: RenderBuffer,
+    pub previous_frame: Grid<RenderCell>,
     pub output: Stdout,
 }
 
@@ -30,61 +245,68 @@ impl CrossTermRenderer {
         output.execute(EnableMouseCapture).expect("Could not enable mouse capture.");
 
         Self { 
-            size: size.clone(), 
-            render_buffer: RenderBuffer { 
-                drawn: vec![
-                    RenderLine { cells: Vec::new() }
-                    ; size.rows as usize
-                ], 
-                current: vec![
-                    RenderLine { cells: Vec::new() }
-                    ; size.rows as usize
-                ] 
-            }, 
+            size: size.clone(),
+            previous_frame: Grid::new(
+                size.rows as usize,
+                size.cols as usize,
+                RenderCell::blank()
+            ),
             output: output,
         }
     }
 
-    fn line_visually_changed(&self, a: &RenderLine, b: &RenderLine) -> bool {
-        if a.cells.len() != b.cells.len() {
-            return true;
+    fn draw_frame(&mut self, frame: Grid<RenderCell>, config: &Config) {
+        let mut out = self.output.lock();
+
+        queue!(out, MoveTo(0, 0)).unwrap();
+
+        for row in 0..frame.rows() {
+            let new_line = &frame.cells[row];
+
+            if let Some(old_line) = self.previous_frame.get(row) {
+                if old_line != new_line {
+                    self.draw_render_line(&mut out, new_line, config);
+                }
+            } else {
+                self.draw_render_line(&mut out, new_line, config);
+            }
+
+            if row + 1 < frame.rows() {
+                write!(out, "\r\n").unwrap();
+            }
         }
 
-        for (c1, c2) in a.cells.iter().zip(b.cells.iter()) {
-            if c1.ch != c2.ch {
-                return true;
-            }
-            if c1.style != c2.style {
-                return true;
-            }
-        }
-
-        false
+        self.previous_frame = frame;
     }
     
-    fn redraw_line(&self, output: &mut StdoutLock, render_line: &RenderLine) {
+    fn draw_render_line(
+        &self,
+        output: &mut StdoutLock,
+        line: &[RenderCell],
+        config: &Config
+    ) {
         let mut current_style: Option<ContentStyle> = None;
-        let mut col: u16 = 0;
 
-        for cell in &render_line.cells {
-            if current_style != Some(cell.style) {
+        for cell in line {
+            if current_style.as_ref() != Some(&cell.style) {
                 let _ = queue!(output, SetStyle(cell.style));
                 current_style = Some(cell.style);
             }
 
             let _ = write!(output, "{}", cell.ch);
-
-            col += cell.ch.width() as u16;
         }
 
-        while col < self.size.cols {
-            let _ = write!(output, " ");
-            col += 1;
+        let missing = self.size.cols as usize - line.len();
+        if missing > 0 {
+            let style = RenderCell::default_style(config);
+            let _ = queue!(output, SetStyle(style));
+            let _ = write!(output, "{}", " ".repeat(missing));
         }
 
         let _ = queue!(output, ResetColor);
     }
 
+    /*
     fn textfield(&mut self, buffer: &Buffer, highlighter: &mut Highlighter, config: &Config) -> io::Result<()> {
         // TODO: Make colors be based on current theme
         let bg = Color::Rgb { r: 22, g: 22, b: 23 };
@@ -206,6 +428,7 @@ impl CrossTermRenderer {
 
         Ok(())
     }
+    */
 }
 
 impl Renderer for CrossTermRenderer {
@@ -214,74 +437,20 @@ impl Renderer for CrossTermRenderer {
         self.output.queue(cursor::Hide).expect("Could not hide cursor.");
     }
 
-    fn draw_buffer(&mut self, buffer: &mut Buffer, ui: &UiManager, highlighter: &mut Highlighter, editor_mode: &EditorMode, config: &Config) {
-        let mut output = self.output.lock();
-        queue!(output, MoveTo(0, 0)).expect("Could not move cursor to 0, 0.");
+    fn draw_buffer(&mut self, editor: &Editor, ui: &UiManager, config: &Config) {
+        let gutter_width = 5usize;
+        let text_width = self.size.cols as usize - gutter_width;
+        let height = self.size.rows as usize;
 
-        let empty_line = RenderLine {
-                cells: vec![
-                    RenderCell { ch: " ".to_string(), style: ContentStyle::new().reset() };
-                    self.size.cols as usize
-                ]
-        };
-        self.render_buffer.current = vec![empty_line; self.size.rows as usize];
+        let gutter_size = Size { cols: gutter_width as u16, rows: self.size.rows };
+        let text_size   = Size { cols: text_width  as u16, rows: self.size.rows };
 
-        let _ = self.textfield(buffer, highlighter, config);
+        let gutter = GutterLayer::render(editor, ui, config, gutter_size);
+        let text   = TextLayer::render(editor, ui, config, text_size);
 
-        ui.render(&mut self.render_buffer.current);
+        let final_frame = Composite::merge(&gutter, &text);
 
-        if self.render_buffer.current.len() == 0 {
-            return;
-        }
-
-        for (index, current_line) in self.render_buffer.current.iter().enumerate() {
-            let current_line = current_line.clone();
-
-            if let Some(drawn_line) = self.render_buffer.drawn.get(index) {
-                if self.line_visually_changed(drawn_line, &current_line) {
-                    self.redraw_line(&mut output, &current_line);
-                    self.render_buffer.drawn[index] = current_line.clone();
-                }
-            } else {
-                self.redraw_line(&mut output, &current_line);
-                self.render_buffer.drawn[index] = current_line.clone();
-            }
-
-            // only print newline if not last
-            if index + 1 != self.render_buffer.current.len() {
-                let _ = write!(output, "\r\n");
-            }
-        }
-        // current -> drawn
-        // self.render_buffer.drawn = self.render_buffer.current.clone();
-        
-        let checked_row = buffer.checked_row();
-
-        if *editor_mode == EditorMode::NORMAL {
-            let _ = self.output.queue(SetCursorStyle::BlinkingBlock);
-        } else {
-            let _ = self.output.queue(SetCursorStyle::BlinkingBar);
-        }
-          
-        buffer.clamp_cursor();
-        match editor_mode {
-            EditorMode::INSERT |
-            EditorMode::NORMAL => {
-                if let Some(checked_row) = checked_row {
-                    let _ = self.output.queue(MoveTo(6 + (buffer.cursor.col - buffer.scroll_offset.horizontal) as u16, checked_row as u16 + 1));
-                } else {
-                    let _ = self.output.queue(MoveTo(6 + (buffer.cursor.col - buffer.scroll_offset.horizontal) as u16, 1));
-                }  
-            }
-            EditorMode::COMMAND => {
-                let command = ui.get::<Command>();
-
-                if let Some(command) = command {
-                    let _ = self.output.queue(MoveTo(command.get_position() as u16, 1));
-                }
-            }
-        }
-         
+        self.draw_frame(final_frame, config);
     } 
 
     fn end_frame(&mut self) {

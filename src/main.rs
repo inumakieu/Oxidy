@@ -1,8 +1,11 @@
+#![allow(warnings)]
+
 use std::io;
 use std::env;
 use std::io::Write;
 use std::panic;
 
+pub mod app;
 pub mod types;
 pub mod highlighter;
 pub mod editor;
@@ -15,12 +18,13 @@ pub mod services;
 pub mod ui;
 pub mod log_manager;
 pub mod command;
+pub mod keymap;
 
 use crossterm::cursor;
 use crossterm::terminal;
 use crossterm::terminal::EndSynchronizedUpdate;
 use crossterm::ExecutableCommand;
-use editor::Editor;
+use app::App;
 
 use crate::input::CrosstermInput;
 use crate::renderer::crossterm::CrossTermRenderer;
@@ -67,16 +71,12 @@ fn main() -> io::Result<()> {
     let renderer = CrossTermRenderer::new(size.clone());
     let input = CrosstermInput::new(); 
     
-    let mut editor = Editor::new(
-        size,
-        Box::new(renderer),
-        Box::new(input),
-    );
+    let mut app = App::new(size, Box::new(renderer), Box::new(input));
     
     if let Some(input_file) = args.next() {
-        editor.load_file(&input_file)?;
+        app.open_file(input_file);
     }
-    editor.run()?;
+    app.run();
 
     Ok(())
 }

@@ -25,6 +25,11 @@ impl Config {
             statusbar: self.statusbar.clone()
         }
     }
+
+    pub fn current_theme(&self) -> Theme {
+        let current = self.themes.get(self.theme.as_ref().unwrap());
+        return current.cloned().unwrap_or_default();
+    }
 }
 
 impl Default for Config {

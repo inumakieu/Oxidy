@@ -3,8 +3,7 @@ use std::any::Any;
 use crossterm::style::{Color, StyledContent, Stylize};
 
 use crate::{types::{RenderCell, RenderLine}, ui::ui_element::UiElement};
-use crate::buffer::Cursor;
-use crate::types::EditorMode;
+use crate::types::{Cursor, EditorMode};
 
 pub struct StatusBar {
     pub name: String,
@@ -27,8 +26,8 @@ impl UiElement for StatusBar {
         let file_path = self.item(&self.file);
 
         let mode = match self.mode {
-            EditorMode::INSERT => " INS",
-            EditorMode::COMMAND => " CMD",
+            EditorMode::Insert => " INS",
+            EditorMode::Command => " CMD",
             _ => ""
         };
 
@@ -69,7 +68,7 @@ impl StatusBar {
             name: "Oxidy".to_string(),
             file: "file.rs".to_string(),
             pos: Cursor { col: 0, row: 0 },
-            mode: EditorMode::NORMAL,
+            mode: EditorMode::Normal,
             bg: Color::Rgb { r: 68, g: 68, b: 72 },
             fg: Color::Rgb { r: 201, g: 199, b: 205 },
             left_symbol: "".to_string(),

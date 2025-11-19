@@ -19,6 +19,7 @@ use crate::{
     }, 
     types::Token
 };
+use crate::plugins::theme::Theme;
 
 pub enum LspServiceEvent {
     Initialized,
@@ -266,7 +267,9 @@ impl LspService {
     }
 
 
-    pub fn set_tokens(&self, buffer: &Buffer, colors: HashMap<String, Color>) -> Vec<Vec<Token>> {
+    pub fn set_tokens(&self, buffer: &Buffer, theme: Theme) -> Vec<Vec<Token>> {
+        let colors = theme.to_map();
+
         let mut current_data: [i32; 5];
         let mut index = 0;
         let mut previousDeltaStart = 0;
