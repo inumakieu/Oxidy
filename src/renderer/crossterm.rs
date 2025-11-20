@@ -156,7 +156,7 @@ impl TextLayer {
         for token in tokens {
             let style = ContentStyle::new()
                 .on(config.current_theme().background())
-                .with(config.current_theme().foreground());
+                .with(token.style.unwrap_or(config.current_theme().foreground()));
 
             let mut logical_col = token.offset;
 

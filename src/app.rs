@@ -8,7 +8,7 @@ use crate::editor::Editor;
 use crate::command::CommandManager;
 use crate::highlighter::Highlighter;
 use crate::plugins::plugin_manager::PluginManager;
-use crate::services::lsp_service::{LspService, LspServiceEvent};
+use crate::services::lsp_service::{LspService, LspServiceEvent, LspState};
 use crate::ui::ui_manager::UiManager;
 use crate::ui::status_bar::StatusBar;
 use crate::renderer::Renderer;
@@ -51,10 +51,15 @@ impl App {
                 .map("<Down>", EditorAction::MoveCursor(Direction::Down))
                 .map("<Left>", EditorAction::MoveCursor(Direction::Left))
                 .map("<Right>", EditorAction::MoveCursor(Direction::Right))
+                .map("w", EditorAction::SaveCurrentBuffer)
                 .map("q", EditorAction::QuitRequested);
         keymap.insert()
                 .map("<Backspace>", EditorAction::DeleteChar)
                 .map("<Enter>", EditorAction::InsertNewline)
+                .map("<Up>", EditorAction::MoveCursor(Direction::Up))
+                .map("<Down>", EditorAction::MoveCursor(Direction::Down))
+                .map("<Left>", EditorAction::MoveCursor(Direction::Left))
+                .map("<Right>", EditorAction::MoveCursor(Direction::Right))
                 .map("<Esc>", EditorAction::ChangeMode(EditorMode::Normal));
         keymap.command()
                 .map("<Enter>", EditorAction::ExecuteCommand)
@@ -98,6 +103,13 @@ impl App {
                     EditorEvent::QuitRequested => { 
                         println!("Quit Requested.");
                         return;
+                    }
+                    EditorEvent::SaveRequested(_) => {
+                        let buffer = self.editor.active_buffer();
+                        if let Some(buffer) = buffer {
+                            self.lsp.set_state(LspState::FileOpened);
+                            self.lsp.request_semantic_tokens(&buffer);
+                        }
                     }
                     _ => {}
                 }
@@ -178,6 +190,6 @@ impl App {
                 
         let root_index = path.rfind("/").unwrap();
         let root_uri = &path[0..root_index];
-        // self.lsp.initialize(&root_uri);
+        self.lsp.initialize(&root_uri);
     }
 }

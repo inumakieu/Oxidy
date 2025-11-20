@@ -63,8 +63,94 @@ impl Editor {
                         Direction::Down => self.move_cursor_down(),
                         Direction::Left => self.move_cursor_left(),
                         Direction::Right => self.move_cursor_right(),
-                        _ => {}
                     }
+                }
+            }
+            EditorAction::InsertChar(ch) => {
+                let view = self.views.get(&self.active_view).unwrap();
+                if let Some(buffer) = self.buffers.get_mut(&view.buffer) {
+                    if let Some(line) = buffer.lines.get_mut(view.cursor.row) {
+                        // check if cursor is inside char (unicode)
+                        let byte_idx = line.char_indices()
+                            .nth(view.cursor.col)
+                            .map(|(i, _)| i)
+                            .unwrap_or_else(|| line.len());
+                        line.insert(byte_idx, *ch);
+
+                        view.highlighter.shift_line_tokens(view.cursor.row, view.cursor.col, 1);
+
+                        self.move_cursor_right();
+                    }
+                }
+            }
+            EditorAction::DeleteChar => {
+                let view = self.views.get_mut(&self.active_view).unwrap();
+                if let Some(buffer) = self.buffers.get_mut(&view.buffer) {
+                    let line_index = view.cursor.row;
+                    let mut new_col = view.cursor.col;
+                    let mut move_up = false;
+
+                    if view.cursor.col == 0 {
+                        if line_index > 0 {
+                            // split the slice to borrow both lines safely
+                            let (before, after) = buffer.lines.split_at_mut(line_index);
+                            let prev = &mut before[line_index - 1];
+                            let curr = &mut after[0];
+                            new_col = prev.clone().len();
+                            prev.push_str(curr);
+                            buffer.lines.remove(line_index);
+                            move_up = true;
+                        }
+                    } else if let Some(line) = buffer.lines.get_mut(line_index) {
+                        if view.cursor.col <= line.len() {
+                            let byte_idx = line.char_indices()
+                                .nth(view.cursor.col - 1)
+                                .map(|(i, _)| i)
+                                .unwrap_or_else(|| line.len());
+                            line.remove(byte_idx);
+                            new_col -= 1;
+                        }
+                    }
+
+                    view.highlighter.shift_line_tokens(view.cursor.row, view.cursor.col, -1);
+                    
+                    view.cursor.col = new_col;
+                    if move_up { self.move_cursor_up(); }
+                }
+            }
+            EditorAction::InsertNewline => {
+                let view = self.views.get_mut(&self.active_view).unwrap();
+                if let Some(buffer) = self.buffers.get_mut(&view.buffer) {
+                    if view.cursor.row >= buffer.lines.len() {
+                        return;
+                    }
+
+                    // Take ownership of the current line (no borrow remains)
+                    let line = buffer.lines.remove(view.cursor.row);
+
+                    if view.cursor.col < line.len() {
+                        let (first, second) = line.split_at(view.cursor.col);
+
+                        buffer.lines.insert(view.cursor.row, first.to_string());
+                        buffer.lines.insert(view.cursor.row + 1, second.to_string());
+                    } else {
+                        // cursor at end → insert empty line
+                        buffer.lines.insert(view.cursor.row, line);
+                        buffer.lines.insert(view.cursor.row + 1, String::new());
+                    }
+
+                    view.cursor.row += 1;
+                    view.cursor.col = 0;
+                }
+            }
+            EditorAction::ChangeMode(mode) => {
+                if let Some(view) = self.views.get_mut(&self.active_view) {
+                    view.mode = mode.clone();
+                }
+            }
+            EditorAction::SaveCurrentBuffer => {
+                if let Some(view) = self.views.get_mut(&self.active_view) {
+                    self.event_sender.send(EditorEvent::SaveRequested(view.buffer));
                 }
             }
             EditorAction::QuitRequested => {self.event_sender.send(EditorEvent::QuitRequested);},
@@ -114,7 +200,8 @@ impl Editor {
         if let Some(view) = self.active_view() {
             return self.buffers.get(&view.buffer);
         }
-
+        
+        eprintln!("NONE");
         None
     }
 

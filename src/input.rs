@@ -86,3 +86,17 @@ impl CrosstermInput {
         }
     }
 }
+
+pub struct WgpuInput;
+
+impl InputHandler for WgpuInput {
+    fn poll(&mut self) -> io::Result<Option<InputEvent>> {
+        Ok(None)
+    }
+}
+
+impl WgpuInput {
+    pub fn new() -> Self {
+        Self
+    }
+}

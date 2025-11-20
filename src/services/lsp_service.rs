@@ -29,7 +29,7 @@ pub enum LspServiceEvent {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum LspState {
+pub enum LspState {
     Uninitialized,
     Initializing,
     Initialized,
@@ -126,6 +126,10 @@ impl LspService {
                 state: LspState::Uninitialized
             }
         )
+    }
+
+    pub fn set_state(&mut self, state: LspState) {
+        self.state = state;
     }
 
     pub fn send<T: serde::Serialize>(&self, msg: LspMessage<T>) {

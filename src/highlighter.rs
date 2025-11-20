@@ -160,6 +160,24 @@ impl Highlighter {
 
         tokens
     }
+
+    pub fn shift_line_tokens(&self, row: usize, col: usize, width: isize) {
+        if let Some(tokens) = self.tokens.borrow_mut().get_mut(row) {
+            for token in tokens {
+                if token.offset >= col {
+                    let new_offset = (token.offset as isize) + width;
+                    token.offset = new_offset.max(0) as usize;
+                }
+            }
+        }
+        self.cache.borrow_mut().clear();
+    }
+
+    pub fn get_tokens(&self, row: usize) -> Option<Vec<Token>> {
+        let value = self.tokens.borrow();
+
+        return value.clone().get(row).cloned()
+    }
     
     pub fn update_tokens(&self, tokens: Vec<Vec<Token>>) {
         *self.tokens.borrow_mut() = tokens;
