@@ -139,7 +139,7 @@ impl Keymap {
         if let EditorMode::Command = mode {
             if let InputEvent::Key { key: Key::Char(ch), modifiers } = input {
                 if !modifiers.ctrl && !modifiers.alt {
-                    // return Some(EditorAction::InsertCommandChar(ch));
+                    return Some(EditorAction::InsertCommandChar(ch));
                 }
             }
         }

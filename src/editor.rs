@@ -66,6 +66,9 @@ impl Editor {
                     }
                 }
             }
+            EditorAction::InsertCommandChar(ch) => {
+                self.event_sender.send(EditorEvent::CommandRequested(ch.to_string()));
+            }
             EditorAction::InsertChar(ch) => {
                 let view = self.views.get(&self.active_view).unwrap();
                 if let Some(buffer) = self.buffers.get_mut(&view.buffer) {
@@ -147,6 +150,15 @@ impl Editor {
                 if let Some(view) = self.views.get_mut(&self.active_view) {
                     view.mode = mode.clone();
                 }
+
+                match mode {
+                    EditorMode::Command => { self.event_sender.send(EditorEvent::ShowCommand); },
+                    EditorMode::Normal => { self.event_sender.send(EditorEvent::HideCommand); },
+                    _ => {}
+                }
+            }
+            EditorAction::ExecuteCommand => {
+                self.event_sender.send(EditorEvent::ExecuteCommand);
             }
             EditorAction::SaveCurrentBuffer => {
                 if let Some(view) = self.views.get_mut(&self.active_view) {

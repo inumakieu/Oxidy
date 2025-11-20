@@ -5,12 +5,13 @@ use std::sync::Arc;
 
 use crate::types::{EditorAction, EditorEvent, EditorMode, Size, Direction};
 use crate::editor::Editor;
-use crate::command::CommandManager;
+use crate::command::{self, CommandManager};
 use crate::highlighter::Highlighter;
 use crate::plugins::plugin_manager::PluginManager;
 use crate::services::lsp_service::{LspService, LspServiceEvent, LspState};
 use crate::ui::ui_manager::UiManager;
 use crate::ui::status_bar::StatusBar;
+use crate::ui::command::Command;
 use crate::renderer::Renderer;
 use crate::input::{InputHandler};
 use crate::plugins::config::Config;
@@ -23,7 +24,7 @@ pub struct App {
     commands: CommandManager,
     keymap: Keymap,
     plugins: PluginManager,
-    lsp: LspService,
+    lsp: Option<LspService>,
     ui: UiManager,
     renderer: Box<dyn Renderer>,
     input: Box<dyn InputHandler>,
@@ -36,10 +37,12 @@ impl App {
     pub fn new(size: Size, renderer: Box<dyn Renderer>, input: Box<dyn InputHandler>) -> Self {
         let commands = CommandManager::new();
         let mut plugins = PluginManager::new();
-        let lsp = LspService::new().unwrap();
+        let lsp = None; //LspService::new();
         let mut ui = UiManager::new();
         let status_bar = StatusBar::new();
         ui.add(status_bar);
+        let command = Command::new();
+        ui.add(command);
 
         let mut keymap = Keymap::new();
 
@@ -92,6 +95,7 @@ impl App {
     }
 
     pub fn run(&mut self) {
+        self.register_commands();
         loop {
             self.handle_input_event();
             
@@ -105,11 +109,60 @@ impl App {
                         return;
                     }
                     EditorEvent::SaveRequested(_) => {
-                        let buffer = self.editor.active_buffer();
-                        if let Some(buffer) = buffer {
-                            self.lsp.set_state(LspState::FileOpened);
-                            self.lsp.request_semantic_tokens(&buffer);
+                        if let Some(lsp) = self.lsp.as_mut() {
+                            let buffer = self.editor.active_buffer();
+                            if let Some(buffer) = buffer {
+                                lsp.set_state(LspState::FileOpened);
+                                lsp.request_semantic_tokens(&buffer);
+                            }
                         }
+                    }
+                    EditorEvent::ShowCommand => {
+                        let command = self.ui.get_mut::<Command>();
+
+                        if let Some(command) = command {
+                            command.shown = true;
+                        }
+                    }
+                    EditorEvent::HideCommand => {
+                        let command = self.ui.get_mut::<Command>();
+
+                        if let Some(command) = command {
+                            command.shown = false;
+                        }
+                    }
+                    EditorEvent::CommandRequested(cmd) => {
+                        let command = self.ui.get_mut::<Command>();
+
+                        if let Some(command) = command {
+                            command.command.push_str(&cmd);
+                        }
+                    }
+                    EditorEvent::StartLsp(name) => {
+                        self.lsp = LspService::new(name);
+                        if let Some(lsp) = self.lsp.as_mut() {
+                            let path = self.editor.active_buffer().unwrap().path.clone();
+
+                            let root_index = path.rfind("/").unwrap();
+                            let root_uri = &path[0..root_index];
+                            lsp.initialize(&root_uri);
+                        }
+                    }
+                    EditorEvent::ExecuteCommand => {
+                        let command = self.ui.get_mut::<Command>();
+
+                        if let Some(command) = command {
+                            let mut cmd: Vec<String> = command.command.clone()
+                                .split(" ")
+                                .map(|s| s.to_string())
+                                .collect();
+                            
+                            let name = cmd.remove(0);
+                            self.commands.execute(&name, cmd, &mut self.editor);
+                            command.command = "".into();
+                            command.shown = false;
+                        }
+                        self.editor.handle_action(&EditorAction::ChangeMode(EditorMode::Normal));
                     }
                     _ => {}
                 }
@@ -144,30 +197,31 @@ impl App {
     }
 
     fn poll_lsp_events(&mut self) {
-        match self.lsp.poll() {
-            LspServiceEvent::Initialized => {
-                let buffer = self.editor.active_buffer();
-                if let Some(buffer) = buffer {
-                    self.lsp.open_file(&buffer.path, &buffer.text());
+        if let Some(lsp) = self.lsp.as_mut() {
+            match lsp.poll() {
+                LspServiceEvent::Initialized => {
+                    let buffer = self.editor.active_buffer();
+                    if let Some(buffer) = buffer {
+                        lsp.open_file(&buffer.path, &buffer.text());
+                    }
                 }
-            }
-            LspServiceEvent::OpenedFile => {
-                let buffer = self.editor.active_buffer();
-                if let Some(buffer) = buffer {
-                    self.lsp.request_semantic_tokens(&buffer);
+                LspServiceEvent::OpenedFile => {
+                    let buffer = self.editor.active_buffer();
+                    if let Some(buffer) = buffer {
+                        lsp.request_semantic_tokens(&buffer);
+                    }
                 }
-            }
-            LspServiceEvent::ReceivedSemantics { semantics: _ } => {
-                let theme = self.config.current_theme();
-                let buffer = self.editor.active_buffer();
-                if let Some(buffer) = buffer {
-                    let tokens = self.lsp.set_tokens(&buffer, theme);
-                    self.editor.update_tokens(tokens);
+                LspServiceEvent::ReceivedSemantics { semantics: _ } => {
+                    let theme = self.config.current_theme();
+                    let buffer = self.editor.active_buffer();
+                    if let Some(buffer) = buffer {
+                        let tokens = lsp.set_tokens(&buffer, theme);
+                        self.editor.update_tokens(tokens);
+                    }
                 }
+                _ => {}
             }
-            _ => {}
         }
-
     }
 
     pub fn open_file(&mut self, path: String) {
@@ -187,9 +241,40 @@ impl App {
         if let Some(status) = status {
             status.file = path.to_string().clone();
         }
-                
-        let root_index = path.rfind("/").unwrap();
-        let root_uri = &path[0..root_index];
-        self.lsp.initialize(&root_uri);
+    }
+
+    pub fn register_commands(&mut self) {
+        self.commands.register(
+            command::Command {
+                name: "q".into(),
+                description: "Quit Oxidy.".into(),
+                execute: (|editor, args| {
+                    editor.event_sender.send(EditorEvent::QuitRequested);
+
+                    Ok(())
+                })
+            }
+        );
+
+        self.commands.register(
+            command::Command {
+                name: "lsp".into(),
+                description: "Interface the LSP.".into(),
+                execute: (|editor, args| {
+                    if let Some(subcommand) = args.first() {
+                        match subcommand.as_str() {
+                            "start" => {
+                                let lsp_name = args[1..].join(" ");
+                                editor.event_sender.send(EditorEvent::StartLsp(lsp_name));
+                            }
+                            "end" => {}
+                            _ => {}
+                        }
+                    }
+
+                    Ok(())
+                })
+            }
+        )
     }
 }

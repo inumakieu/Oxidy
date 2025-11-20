@@ -95,6 +95,7 @@ impl Default for Modifiers {
 #[derive(PartialEq, Debug, Clone)]
 pub enum EditorAction {
     MoveCursor(Direction),
+    InsertCommandChar(char),
     InsertChar(char),
     DeleteChar,
     InsertNewline,
@@ -115,6 +116,10 @@ pub enum EditorEvent {
     SaveRequested(BufferId),
     QuitRequested,
     CommandRequested(String),
+    ExecuteCommand,
+    ShowCommand,
+    HideCommand,
+    StartLsp(String),
     None
 }
 
@@ -207,6 +212,14 @@ impl RenderCell {
         Self {
             ch: ' ',
             style: Self::default_style(config),
+            transparent: false
+        }
+    }
+
+    pub fn space_col(col: Color) -> Self {
+        Self {
+            ch: ' ',
+            style: ContentStyle::new().on(col),
             transparent: false
         }
     }

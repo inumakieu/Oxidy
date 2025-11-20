@@ -49,8 +49,8 @@ pub struct LspService {
 }
 
 impl LspService {
-    pub fn new() -> Option<Self> {
-        let mut process = Command::new("rust-analyzer")
+    pub fn new(name: String) -> Option<Self> {
+        let mut process = Command::new(name)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())

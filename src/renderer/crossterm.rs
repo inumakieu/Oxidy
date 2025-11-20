@@ -392,8 +392,22 @@ impl Renderer for CrossTermRenderer {
             let cursor_pos = active_view.cursor.clone();
             let line_length = editor.active_buffer().unwrap().line(cursor_pos.row).unwrap().len();
             
-            let col = cursor_pos.col.min(line_length);
+            let mut col = cursor_pos.col.min(line_length);
             let row = cursor_pos.row  + ui.top_offset()- active_view.scroll.vertical;
+
+            if active_view.mode != EditorMode::Normal {
+                let _ = self.output.queue(cursor::SetCursorStyle::BlinkingBar);
+            } else {
+                let _ = self.output.queue(cursor::SetCursorStyle::BlinkingBlock);
+            }
+
+            if active_view.mode == EditorMode::Command {
+                let command = ui.get::<Command>();
+
+                if let Some(command) = command {
+                    col = command.command.len();
+                }
+            }
 
             self.output.queue(cursor::MoveTo(gutter_width as u16 + col as u16, row as u16)).expect("Could not move cursor.");
         }
