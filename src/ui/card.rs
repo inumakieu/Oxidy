@@ -2,7 +2,7 @@ use std::any::Any;
 
 use crossterm::style::{ContentStyle, Stylize, Color};
 
-use crate::{types::{RenderCell, RenderLine}, ui::ui_element::UiElement};
+use crate::{types::{RenderCell, Grid}, ui::ui_element::UiElement};
 
 #[derive(Clone, PartialEq)]
 pub enum CardType {
@@ -55,7 +55,8 @@ impl UiElement for Card {
     fn as_any(&self) -> &dyn Any { self }
     fn as_any_mut(&mut self) -> &mut dyn Any { self }
 
-    fn render(&self, frame: &mut Vec<RenderLine>) {
+    fn render(&self, frame: &mut Grid<RenderCell>) {
+        /*
         if self.description.is_empty() { return }
         let top_left = '╭';
         let top_right = '╮';
@@ -112,5 +113,6 @@ impl UiElement for Card {
             }
             frame[frame_height - 1 - (height - y)] = render_line
         }
+        */
     }
 }

@@ -2,7 +2,7 @@ use std::any::Any;
 
 use crossterm::style::{Color, StyledContent, Stylize};
 
-use crate::{types::{RenderCell, RenderLine}, ui::ui_element::UiElement};
+use crate::{types::{RenderCell, Grid}, ui::ui_element::UiElement};
 use crate::types::{Cursor, EditorMode};
 
 pub struct StatusBar {
@@ -20,7 +20,7 @@ impl UiElement for StatusBar {
     fn as_any(&self) -> &dyn Any { self }
     fn as_any_mut(&mut self) -> &mut dyn Any { self }
 
-    fn render(&self, frame: &mut Vec<RenderLine>) {
+    fn render(&self, frame: &mut Grid<RenderCell>) {
         let mut items = vec![];
         let title = self.item(&self.name);
         let file_path = self.item(&self.file);
@@ -39,26 +39,29 @@ impl UiElement for StatusBar {
         items.extend(file_path);
 
         let gap = self.spacer(
-            frame[0].cells.len() - (
-                (self.left_symbol.len() * 3) +
-                (self.right_symbol.len() * 3) + 
+            frame.cells[0].len() - (
+                (self.left_symbol.len()) +
+                (self.right_symbol.len()) + 
                 self.name.len() + self.file.len() + state.len()
-            ) + 5
+            ) - 9
         );
         items.push(gap);
         items.extend(state_item);
 
-        let mut render_line = RenderLine { cells: Vec::new() };
+        let mut render_line = frame.cells[0].clone();
         
+        let mut col = 1;
         for item in items {
             for char in item.content().chars() {
-                render_line.cells.push(
-                    RenderCell { ch: char.to_string(), style: item.style().clone() }
-                );
+                if col >= render_line.len() { break; }
+
+                render_line[col] = RenderCell { ch: char, style: item.style().clone(), transparent: false };
+                
+                col += 1; // char.len();
             }
         }
 
-        frame[0] = render_line;
+        frame.cells[0] = render_line;
     }
 }
 

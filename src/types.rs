@@ -29,6 +29,14 @@ pub struct Size {
     pub rows: u16
 }
 
+#[derive(Debug, Clone)]
+pub struct Rect {
+    pub x: u16,
+    pub y: u16,
+    pub cols: u16,
+    pub rows: u16
+}
+
 #[derive(Debug, PartialEq, Clone)]
 pub enum EditorMode {
     Insert,
@@ -145,6 +153,20 @@ impl<T: Clone> Grid<T> {
         }
     }
 
+    pub fn blit(&mut self, src: &Grid<T>, x: usize, y: usize) {
+        for row in 0..src.rows() {
+            let dest_row = y + row;
+            if dest_row >= self.rows() { break; }
+
+            for col in 0..src.cols() {
+                let dest_col = x + col;
+                if dest_col >= self.cols() { break; }
+
+                self.cells[dest_row][dest_col] = src.cells[row][col].clone();
+            }
+        }
+    }
+
     pub fn get(&self, row: usize) -> Option<&Vec<T>> {
         self.cells.get(row)
     }
@@ -154,16 +176,17 @@ impl<T: Clone> Grid<T> {
 }
 
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Debug)]
 pub struct RenderCell {
-    pub ch: String,
-    pub style: ContentStyle
+    pub ch: char,
+    pub style: ContentStyle,
+    pub transparent: bool
 }
 
 impl RenderCell {
     pub fn from_grapheme(g: &str, style: ContentStyle) -> Self {
         let ch = g.chars().next().unwrap_or(' ');
-        Self { ch: ch.into(), style }
+        Self { ch: ch, style, transparent: false }
     }
 
     pub fn default_style(config: &Config) -> ContentStyle {
@@ -174,22 +197,25 @@ impl RenderCell {
 
     pub fn blank() -> Self {
         Self {
-            ch: " ".into(),
-            style: ContentStyle::new()
+            ch: ' ',
+            style: ContentStyle::new(),
+            transparent: true
         }
     }
 
     pub fn space(config: &Config) -> Self {
         Self {
-            ch: " ".into(),
-            style: Self::default_style(config)
+            ch: ' ',
+            style: Self::default_style(config),
+            transparent: false
         }
     }
 
     pub fn tilde(config: &Config) -> Self {
         Self {
-            ch: "~".into(),
-            style: Self::default_style(config)
+            ch: '~',
+            style: Self::default_style(config),
+            transparent: false
         }
     }
 }

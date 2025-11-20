@@ -13,7 +13,7 @@ use crate::highlighter::Highlighter;
 use crate::plugins::config::Config;
 use crate::renderer::{Renderer, Layer};
 use crate::buffer::{Buffer, BufferView};
-use crate::types::{Token, EditorMode, RenderBuffer, RenderCell, RenderLine, Size, Grid};
+use crate::types::{Token, EditorMode, RenderBuffer, RenderCell, RenderLine, Size, Grid, Rect, ViewId};
 use crate::ui::command::Command;
 use crate::ui::ui_manager::UiManager;
 use crate::editor::Editor;
@@ -21,18 +21,17 @@ use crate::editor::Editor;
 pub struct GutterLayer;
 
 impl Layer for GutterLayer {
-    fn render(editor: &Editor, ui: &UiManager, config: &Config, size: Size) -> Grid<RenderCell> {
+    fn render(editor: &Editor, view: &BufferView, ui: &UiManager, config: &Config, rect: Rect) -> Grid<RenderCell> {
         let mut grid = Grid::new(
-            size.rows as usize,
-            size.cols as usize,
+            rect.rows as usize,
+            rect.cols as usize,
             RenderCell::blank()
         );
 
-        let view = match editor.active_view() {
+        let active_view = match editor.active_view() {
             Some(v) => v,
             None => {
-                // Empty buffer case with '~'
-                for row in 0..size.rows as usize {
+                for row in 0..rect.rows as usize {
                     grid.cells[row][0] = RenderCell::space(config);
                     grid.cells[row][1] = RenderCell::space(config);
                     grid.cells[row][2] = RenderCell::space(config);
@@ -43,20 +42,19 @@ impl Layer for GutterLayer {
             }
         };
 
-        let gutter_width = size.cols as usize;
+        let gutter_width = rect.cols as usize;
         let buffer = editor.buffer(&view.buffer).unwrap();
         let total_lines = buffer.lines.len();
 
         let scroll = view.scroll.vertical;
-        let cursor_line = view.cursor.row + scroll; // absolute line index
+        let cursor_line = view.cursor.row;
 
         let use_relative = config.opt.relative_numbers.unwrap();
 
-        for screen_row in 0..size.rows as usize {
+        for screen_row in 0..rect.rows as usize {
             let buffer_row = screen_row + scroll;
 
             if buffer_row >= total_lines {
-                // draw "~" beyond end of buffer
                 for col in 0..gutter_width {
                     grid.cells[screen_row][col] = RenderCell::space(config);
                 }
@@ -64,13 +62,12 @@ impl Layer for GutterLayer {
                 continue;
             }
 
-            // ----- COMPUTE LINE NUMBER -----
             let line_number: i32 = if use_relative {
                 let dist = (cursor_line as i32 - buffer_row as i32).abs();
                 if dist == 0 {
-                    (buffer_row + 1) as i32       // real number for current line
+                    (buffer_row + 1) as i32
                 } else {
-                    dist                         // relative for others
+                    dist
                 }
             } else {
                 (buffer_row + 1) as i32
@@ -78,9 +75,20 @@ impl Layer for GutterLayer {
 
             let text = format!("{:>width$} ", line_number, width = gutter_width - 1);
 
-            // ----- WRITE INTO GRID -----
             for (i, ch) in text.chars().enumerate() {
-                grid.cells[screen_row][i] = RenderCell { ch: ch.into(), style: RenderCell::default_style(config) };
+                let mut fg = Color::DarkGrey;
+
+                if buffer_row == cursor_line && view.id == active_view.id {
+                    fg = config.current_theme().foreground();
+                }
+
+                grid.cells[screen_row][i] = RenderCell { 
+                    ch: ch, 
+                    style: ContentStyle::new()
+                        .on(config.current_theme().background())
+                        .with(fg),
+                    transparent: false
+                };
             }
         }
 
@@ -97,18 +105,17 @@ impl TextLayer {
         buffer: &Buffer,
         view: &BufferView,
         config: &Config,
-        size: Size,
+        rect: Rect,
     ) {
         let bg = config.current_theme().background();
         let fg = config.current_theme().foreground();
 
         let first_line = view.scroll.vertical;
-        let last_line  = first_line + size.rows as usize;
+        let last_line  = first_line + rect.rows as usize;
 
-        for screen_row in 0..size.rows as usize {
+        for screen_row in 0..rect.rows as usize {
             let buffer_row = first_line + screen_row;
 
-            // If user scrolled past EOF → blank row
             if buffer_row >= buffer.lines.len() {
                 Self::render_empty_line(&mut grid.cells[screen_row], bg);
                 continue;
@@ -116,7 +123,6 @@ impl TextLayer {
 
             let text = &buffer.lines[buffer_row];
 
-            // highlight tokens for that line
             let tokens = view.highlighter.highlight(text, buffer_row);
 
             Self::render_highlighted_line(
@@ -150,29 +156,14 @@ impl TextLayer {
 
             let mut logical_col = token.offset;
 
-            for g in token.text.graphemes(true) {
-                let width = unicode_width::UnicodeWidthStr::width(g);
-
-                if logical_col + width <= horiz_scroll {
-                    logical_col += width;
-                    continue; // skip scrolled-off characters
-                }
-
+            for ch in token.text.chars() {
                 let screen_col = logical_col - horiz_scroll;
 
                 if screen_col >= row.len() { return; }
 
-                // draw main char
-                row[screen_col] = RenderCell::from_grapheme(g, style);
+                row[screen_col] = RenderCell { ch, style, transparent: false };
 
-                // fill extra width for wide chars
-                for i in 1..width {
-                    if screen_col + i < row.len() {
-                        row[screen_col + i] = RenderCell::space(config);
-                    }
-                }
-
-                logical_col += width;
+                logical_col += 1;//ch.len_utf8();
             }
         }
     }
@@ -180,26 +171,37 @@ impl TextLayer {
 
 
 impl Layer for TextLayer {
-    fn render(editor: &Editor, ui: &UiManager, config: &Config, size: Size) -> Grid<RenderCell> {
+    fn render(editor: &Editor, view: &BufferView, ui: &UiManager, config: &Config, rect: Rect) -> Grid<RenderCell> {
         let mut grid = Grid::new(
-            size.rows as usize,
-            size.cols as usize,
+            rect.rows as usize,
+            rect.cols as usize,
             RenderCell::blank()
         );
-
-        let view = match editor.active_view() {
-            Some(v) => v,
-            None => return grid, // nothing open → blank text area
-        };
 
         let buffer = editor.active_buffer();
 
         if let Some(buffer) = buffer {
-            Self::render_lines(&mut grid, buffer, view, config, size);
+            Self::render_lines(&mut grid, buffer, view, config, rect);
         }
 
         grid
     }
+}
+
+pub struct UiLayer;
+
+impl Layer for UiLayer {
+    fn render(editor: &Editor, view: &BufferView, ui: &UiManager, config: &Config, rect: Rect) -> Grid<RenderCell> {
+        let mut grid = Grid::new(
+            rect.rows as usize,
+            rect.cols as usize,
+            RenderCell::blank()
+        );
+
+        ui.render(&mut grid);
+
+        grid
+    }        
 }
 
 pub struct Composite;
@@ -215,17 +217,25 @@ impl Composite {
         for row in 0..out.rows() {
             out.cells[row].extend_from_slice(&text.cells[row]);
         }
-        
-        /*
-        // apply cursor on top of text
-        apply_layer_modifications(&mut out, cursor);
 
-        // apply inline hints and ghost text
-        apply_layer_modifications(&mut out, inline);
+        out
+    }
 
-        // overlay replaces entire cells
-        apply_overlays(&mut out, overlay);
-        */
+    pub fn overlay(
+        base: &Grid<RenderCell>,
+        overlay: &Grid<RenderCell>
+    ) -> Grid<RenderCell> {
+        let mut out = base.clone();
+
+        for row in 0..overlay.cells.len() {
+            for col in 0..overlay.cells[row].len() {
+                let cell = overlay.cells[row][col].clone();
+                if !cell.transparent {
+                    out.cells[row][col] = cell;
+                }
+            }
+        }
+
         out
     }
 }
@@ -285,150 +295,38 @@ impl CrossTermRenderer {
         line: &[RenderCell],
         config: &Config
     ) {
+
         let mut current_style: Option<ContentStyle> = None;
+        let mut printed_cols = 0;
 
         for cell in line {
+            // apply style if needed
             if current_style.as_ref() != Some(&cell.style) {
-                let _ = queue!(output, SetStyle(cell.style));
+                queue!(output, SetStyle(cell.style)).ok();
                 current_style = Some(cell.style);
             }
 
-            let _ = write!(output, "{}", cell.ch);
+            // print the character
+            write!(output, "{}", cell.ch).ok();
+
+            // width might be 0,1,2
+            let width = cell.ch.len_utf8();
+            printed_cols += width;
         }
 
-        let missing = self.size.cols as usize - line.len();
-        if missing > 0 {
+        // now pad remaining columns
+        let total_cols = self.size.cols as usize;
+
+        if printed_cols < total_cols {
             let style = RenderCell::default_style(config);
-            let _ = queue!(output, SetStyle(style));
-            let _ = write!(output, "{}", " ".repeat(missing));
+            queue!(output, SetStyle(style)).ok();
+
+            let missing = total_cols - printed_cols;
+            write!(output, "{}", " ".repeat(missing)).ok();
         }
 
         let _ = queue!(output, ResetColor);
     }
-
-    /*
-    fn textfield(&mut self, buffer: &Buffer, highlighter: &mut Highlighter, config: &Config) -> io::Result<()> {
-        // TODO: Make colors be based on current theme
-        let bg = Color::Rgb { r: 22, g: 22, b: 23 };
-        let fg = Color::Rgb { r: 201, g: 199, b: 205 };
-        let line_color = Color::Rgb { r: 68, g: 68, b: 72 };
-
-        for row in 0..(self.size.rows - 1) {
-            let line = buffer.get_at(row as usize);
-            let mut current_render_line = RenderLine { 
-                cells: vec![
-                    RenderCell { ch: " ".to_string(), style: ContentStyle::new().reset() };
-                    self.size.cols as usize
-                ]
-            };
-            if line.is_none() {
-                let empty = "    ∼ ".to_string().on(bg.clone()).with(line_color.clone());
-                for (index, char) in empty.content().chars().enumerate() {
-                    current_render_line.cells[index] = RenderCell { ch: char.to_string(), style: empty.style().clone() };
-                }
-                self.render_buffer.current[row as usize] = current_render_line;
-                continue;
-            }
-
-            let line_number = {
-                let current_line = buffer.cursor.row as i16 + 1;
-                let line_number: StyledContent<String>;
-                if config.opt.relative_numbers.unwrap() {
-                    let signed_row = row as i16 + 1;
-                    let signed_scroll_offset = buffer.scroll_offset.vertical as i16;
-                    let relative_distance = (current_line - (signed_row + signed_scroll_offset)).abs();
-                    if current_line == signed_row + signed_scroll_offset { 
-                        line_number = format!("{:5} ", current_line).on(bg.clone()).with(fg.clone());
-                    } else {
-                        line_number = format!("{:5} ", relative_distance).on(bg.clone()).with(line_color.clone());
-                    }
-                } else {
-                    if current_line == row as i16 + buffer.scroll_offset.vertical as i16 + 1 {
-                        line_number = format!("{:5} ", row as usize + buffer.scroll_offset.vertical + 1).on(Color::Reset).white();
-                    } else {
-                        line_number = format!("{:5} ", row as usize + buffer.scroll_offset.vertical + 1).on(Color::Reset).dark_grey();
-
-                    }
-                }
-                line_number
-            };
-            let content = line_number.content();
-            let style = line_number.style();
-            let mut current_render_line = RenderLine { 
-                cells: vec![
-                    RenderCell { ch: " ".to_string(), style: ContentStyle::new().on(bg.clone()) };
-                    self.size.cols as usize
-                ]
-
-            };
-            let mut col = 0;
-            for g in content.graphemes(true) {
-                let width = UnicodeWidthStr::width(g) as usize;
-                if col + width > self.size.cols as usize { break; }
-
-                current_render_line.cells[col] = RenderCell { ch: g.to_string(), style: style.clone() };
-
-                // fill any extra columns with blank placeholders to preserve spacing
-                for i in 1..width {
-                    if col + i < self.size.cols as usize {
-                        current_render_line.cells[col + i] = RenderCell { ch: " ".to_string(), style: style.clone() };
-                    }
-                }
-
-                col += width;
-            }
-
-            let styled_line = highlighter.highlight(line.unwrap().as_str(), row as usize + buffer.scroll_offset.vertical);
-            for token in styled_line {
-                let mut logical_col = token.offset; // where it *really* is in the file
-
-                for g in token.text.graphemes(true) {
-                    let width = UnicodeWidthStr::width(g) as usize;
-
-                    // Skip until we reach the scrolled position
-                    if logical_col + width <= buffer.scroll_offset.horizontal {
-                        logical_col += width;
-                        continue;
-                    }
-
-                    // Convert logical column to screen column
-                    let screen_col = logical_col - buffer.scroll_offset.horizontal;
-
-                    // Stop if out of screen
-                    if screen_col + 6 >= self.size.cols as usize {
-                        break;
-                    }
-
-                    let style = ContentStyle::new()
-                        .on(bg.clone())
-                        .with(token.style.unwrap_or(fg.clone()));
-
-                    // Draw the first cell
-                    if screen_col + 6 < self.size.cols as usize {
-                        current_render_line.cells[screen_col + 6] =
-                            RenderCell { ch: g.to_string(), style: style.clone() };
-                    }
-
-                    // Draw padding for full-width graphemes
-                    for i in 1..width {
-                        let sc = screen_col + i;
-                        if sc + 6 < self.size.cols as usize {
-                            current_render_line.cells[sc + 6] =
-                                RenderCell { ch: " ".to_string(), style: style.clone() };
-                        }
-                    }
-
-                    logical_col += width;
-                }
-            }
-
-
-            self.render_buffer.current[row as usize + 1] = current_render_line;
-        }
-
-        Ok(())
-    }
-    */
 }
 
 impl Renderer for CrossTermRenderer {
@@ -438,20 +336,63 @@ impl Renderer for CrossTermRenderer {
     }
 
     fn draw_buffer(&mut self, editor: &Editor, ui: &UiManager, config: &Config) {
-        let gutter_width = 5usize;
-        let text_width = self.size.cols as usize - gutter_width;
-        let height = self.size.rows as usize;
+        let gutter_width = 6u16;
+        let ui_offset = ui.top_offset();
 
-        let gutter_size = Size { cols: gutter_width as u16, rows: self.size.rows };
-        let text_size   = Size { cols: text_width  as u16, rows: self.size.rows };
+        let mut horizontal_dir = true;
+        let mut prev_x = 0;
+        let mut prev_y = 0;
 
-        let gutter = GutterLayer::render(editor, ui, config, gutter_size);
-        let text   = TextLayer::render(editor, ui, config, text_size);
+        let mut final_frame = Grid::new(
+            self.size.rows as usize,
+            self.size.cols as usize,
+            RenderCell::blank()
+        );
 
-        let final_frame = Composite::merge(&gutter, &text);
+        for (id, view) in editor.views() {
+            let text_width   = view.size.cols - gutter_width;
 
+            let gutter = GutterLayer::render(editor, &view, ui, config, Rect {
+                x: prev_x, y: prev_y,
+                cols: gutter_width as u16,
+                rows: view.size.rows
+            });
+
+            let text = TextLayer::render(editor, &view, ui, config, Rect {
+                x: gutter_width + prev_x,
+                y: prev_y,
+                cols: text_width,
+                rows: view.size.rows
+            });
+
+            let view_frame = Composite::merge(&gutter, &text);
+
+            final_frame.blit(&view_frame, prev_x as usize, ui_offset + prev_y as usize);
+
+            prev_x += view.size.cols;
+        }
+
+        let active_view = editor.active_view().unwrap();
+        let ui_layer = UiLayer::render(editor, &active_view, ui, config, Rect {
+            x: 0, y: 0,
+            cols: self.size.cols,
+            rows: self.size.rows
+        });
+
+        final_frame = Composite::overlay(&final_frame, &ui_layer);
+        
         self.draw_frame(final_frame, config);
-    } 
+
+        if let Some(active_view) = editor.active_view() {
+            let cursor_pos = active_view.cursor.clone();
+            let line_length = editor.active_buffer().unwrap().line(cursor_pos.row).unwrap().len();
+            
+            let col = cursor_pos.col.min(line_length);
+            let row = cursor_pos.row  + ui.top_offset()- active_view.scroll.vertical;
+
+            self.output.queue(cursor::MoveTo(gutter_width as u16 + col as u16, row as u16)).expect("Could not move cursor.");
+        }
+    }
 
     fn end_frame(&mut self) {
         self.output.queue(cursor::Show).expect("Could not show cursor.");

@@ -156,7 +156,7 @@ impl PluginManager {
                     Ok(ast) => {
                         self.ast = ast;
                         self.load_config();
-                        // println!("Config reloaded successfully!");
+                        // eprintln!("Config reloaded successfully!");
                     }
                     Err(err) => {
                         println!("Error reloading config: {:?}", err);

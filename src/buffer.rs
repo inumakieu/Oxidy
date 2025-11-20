@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::types::{Size, EditorMode, BufferId, Cursor, ScrollOffset};
+use crate::types::{Size, EditorMode, BufferId, Cursor, ScrollOffset, ViewId};
 use crate::highlighter::Highlighter;
 
 
@@ -9,6 +9,7 @@ pub struct Selection {} // TODO: Support selections
 
 #[derive(Debug, Clone)]
 pub struct BufferView {
+    pub id: ViewId,
     pub buffer: BufferId,
     pub cursor: Cursor,
     pub scroll: ScrollOffset,
@@ -65,10 +66,11 @@ impl Buffer {
 }
 
 impl BufferView {
-    pub fn new(buffer: BufferId, size: Size) -> Self {
+    pub fn new(id: ViewId, buffer: BufferId, size: Size) -> Self {
         let highlighter = Highlighter::new(HashMap::new());
 
         Self {
+            id,
             buffer,
             size,
 

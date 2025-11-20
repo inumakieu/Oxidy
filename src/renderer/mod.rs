@@ -1,9 +1,9 @@
 pub mod crossterm;
 
-use crate::buffer::Buffer;
+use crate::buffer::{Buffer, BufferView};
 use crate::highlighter::Highlighter;
 use crate::plugins::config::Config;
-use crate::types::{EditorMode, Size, RenderCell, Grid};
+use crate::types::{EditorMode, Size, RenderCell, Grid, Rect, ViewId};
 use crate::ui::ui_manager::UiManager;
 use crate::editor::Editor;
 
@@ -15,5 +15,5 @@ pub trait Renderer {
 }
 
 pub trait Layer {
-    fn render(editor: &Editor, ui: &UiManager, config: &Config, size: Size) -> Grid<RenderCell>;
+    fn render(editor: &Editor, view: &BufferView, ui: &UiManager, config: &Config, rect: Rect) -> Grid<RenderCell>;
 }

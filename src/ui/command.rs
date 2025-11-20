@@ -2,7 +2,7 @@ use std::any::Any;
 
 use crossterm::style::{Color, Stylize};
 
-use crate::{types::{RenderCell, RenderLine}, ui::ui_element::UiElement};
+use crate::{types::{RenderCell, Grid}, ui::ui_element::UiElement};
 
 pub struct Command {
     pub command: String,
@@ -30,7 +30,8 @@ impl UiElement for Command {
     fn as_any(&self) -> &dyn Any { self }
     fn as_any_mut(&mut self) -> &mut dyn Any { self }
 
-    fn render(&self, frame: &mut Vec<RenderLine>) {
+    fn render(&self, frame: &mut Grid<RenderCell>) {
+        /*
         let reset_color = Color::Rgb { r: 22, g: 22, b: 23 };
         let fg = Color::Rgb { r: 201, g: 199, b: 205 };
         if !self.shown { return }
@@ -52,5 +53,6 @@ impl UiElement for Command {
         }
 
         frame[1] = render_line;
+        */
     }
 }

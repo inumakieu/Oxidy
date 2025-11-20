@@ -34,9 +34,11 @@ pub struct App {
 impl App {
     pub fn new(size: Size, renderer: Box<dyn Renderer>, input: Box<dyn InputHandler>) -> Self {
         let commands = CommandManager::new();
-        let plugins = PluginManager::new();
+        let mut plugins = PluginManager::new();
         let lsp = LspService::new().unwrap();
-        let ui = UiManager::new();
+        let mut ui = UiManager::new();
+        let status_bar = StatusBar::new();
+        ui.add(status_bar);
 
         let mut keymap = Keymap::new();
 
@@ -44,8 +46,10 @@ impl App {
             .normal()
                 .map("i", EditorAction::ChangeMode(EditorMode::Insert))
                 .map(":", EditorAction::ChangeMode(EditorMode::Command))
-                .map("k", EditorAction::MoveCursor(Direction::Up))
-                .map("j", EditorAction::MoveCursor(Direction::Down))
+                .map("<Up>", EditorAction::MoveCursor(Direction::Up))
+                .map("<Down>", EditorAction::MoveCursor(Direction::Down))
+                .map("<Left>", EditorAction::MoveCursor(Direction::Left))
+                .map("<Right>", EditorAction::MoveCursor(Direction::Right))
                 .map("q", EditorAction::QuitRequested);
         keymap.insert()
                 .map("<Backspace>", EditorAction::DeleteChar)
@@ -61,6 +65,9 @@ impl App {
         let (event_sender, event_receiver) = channel();
 
         let editor = Editor::new(event_sender);
+
+        plugins.load_config();
+        plugins.start_watcher().unwrap();
 
         Self {
             size,
@@ -120,6 +127,7 @@ impl App {
 
     fn poll_plugin_events(&mut self) {
         self.plugins.poll_reload();
+        self.config = self.plugins.config.clone();
     }
 
     fn poll_lsp_events(&mut self) {
@@ -153,7 +161,14 @@ impl App {
         let content = std::fs::read_to_string(&path)
             .expect("Failed to open file");
 
-        self.editor.open_buffer(path.clone(), content, self.size.clone()); 
+        // TODO: Calculate size based on opened buffers
+        let buffer_size = Size {
+            cols: self.size.cols.clone() / 2,
+            rows: self.size.rows.clone() - self.ui.top_offset() as u16
+        };
+
+        self.editor.open_buffer(path.clone(), content.clone(), buffer_size.clone());
+        self.editor.open_buffer(path.clone(), content, buffer_size);
 
         let status = self.ui.get_mut::<StatusBar>();
 

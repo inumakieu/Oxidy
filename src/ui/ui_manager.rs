@@ -1,4 +1,4 @@
-use crate::{types::{RenderBuffer, RenderLine}, ui::ui_element::UiElement};
+use crate::{types::{RenderBuffer, RenderCell, Grid}, ui::ui_element::UiElement};
 
 pub struct UiManager {
     elements: Vec<Box<dyn UiElement>>,
@@ -9,6 +9,10 @@ impl UiManager {
         Self {
             elements: Vec::new()
         }
+    }
+
+    pub fn top_offset(&self) -> usize {
+        return 1;
     }
 
     pub fn add(&mut self, element: impl UiElement + 'static) {
@@ -33,7 +37,7 @@ impl UiManager {
         None
     }
 
-    pub fn render(&self, frame: &mut Vec<RenderLine>) {
+    pub fn render(&self, frame: &mut Grid<RenderCell>) {
         for element in &self.elements {
             element.render(frame);
         }

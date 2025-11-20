@@ -56,7 +56,17 @@ impl Editor {
 
     pub fn handle_action(&mut self, action: &EditorAction) {
         match action {
-            EditorAction::MoveCursor(dir) => {}
+            EditorAction::MoveCursor(dir) => {
+                if let Some(view) = self.views.get_mut(&self.active_view) {
+                    match dir {
+                        Direction::Up => self.move_cursor_up(),
+                        Direction::Down => self.move_cursor_down(),
+                        Direction::Left => self.move_cursor_left(),
+                        Direction::Right => self.move_cursor_right(),
+                        _ => {}
+                    }
+                }
+            }
             EditorAction::QuitRequested => {self.event_sender.send(EditorEvent::QuitRequested);},
             _ => {}
         }
@@ -69,19 +79,15 @@ impl Editor {
             .collect();
 
         let buffer_id = self.buffers.len();
-
         let buffer = Buffer::new(lines, path);
         
         self.buffers.insert(BufferId(buffer_id as u64), buffer);
 
-        let view_id = self.views.len();
-
-        let view = BufferView::new(BufferId(buffer_id as u64), size);
-
-        self.views.insert(ViewId(view_id as u64), view);
-
-        // self.editor.buffer.set(lines.clone(), path.clone());
+        let view_id = ViewId(self.views.len() as u64);
+        let view = BufferView::new(view_id.clone(), BufferId(buffer_id as u64), size.clone());
         
+        self.views.insert(view_id.clone(), view.clone());
+
         /*
         let file_type_index = path.to_string().rfind(".");
         if let Some(file_type_index) = file_type_index {
@@ -110,8 +116,61 @@ impl Editor {
         None
     }
 
+    pub fn views(&self) -> HashMap<ViewId, BufferView> {
+        return self.views.clone()
+    }
+
     pub fn buffer(&self, id: &BufferId) -> Option<&Buffer> {
         return self.buffers.get(id);
+    }
+
+    fn move_cursor_up(&mut self) {
+        if let Some(view) = self.views.get_mut(&self.active_view) {
+            if view.cursor.row > 0 {
+                view.cursor.row -= 1;
+            }
+
+            if view.scroll.vertical == 0 { return }
+
+            if view.cursor.row < view.scroll.vertical {
+                view.scroll.vertical -= 1
+            }
+        }
+    }
+
+    fn move_cursor_down(&mut self) {
+        if let Some(view) = self.views.get_mut(&self.active_view) {
+            if view.cursor.row < self.buffers.get(&view.buffer).unwrap().lines.len() - 1 {
+                view.cursor.row += 1;
+            }
+
+            if view.cursor.row >= view.size.rows as usize + view.scroll.vertical {
+                view.scroll.vertical += 1;
+            }
+        }
+    }
+
+    fn move_cursor_left(&mut self) {
+        if let Some(view) = self.views.get_mut(&self.active_view) {
+            let line = self.buffers.get(&view.buffer).unwrap().line(view.cursor.row).unwrap();
+            if view.cursor.col >= line.len() {
+                view.cursor.col = line.len();
+            }
+
+            if view.cursor.col > 0 {
+                view.cursor.col -= 1;
+            }
+        }
+    }
+
+    fn move_cursor_right(&mut self) {
+        if let Some(view) = self.views.get_mut(&self.active_view) {
+            if let Some(line) = self.buffers.get(&view.buffer).unwrap().line(view.cursor.row) {
+                if view.cursor.col < line.len() {
+                    view.cursor.col += 1;
+                }
+            }
+        }
     }
 
     /*
