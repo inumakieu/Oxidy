@@ -80,7 +80,7 @@ impl Highlighter {
 
         let checksum = self.hash_bytes_default_hasher(line.as_bytes());
 
-        if let Some(cached) = self.cache.borrow().get(&checksum) {
+        if let Some(cached) = self.cache.borrow().get(&checksum) && cached.len() > 0 {
             tokens.extend(cached.clone());
             return tokens;
         }

@@ -141,7 +141,7 @@ pub struct SyntaxRegex {
     pub punctuations: String,
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Debug)]
 pub struct Grid<T> {
     pub cells: Vec<Vec<T>>,
 }

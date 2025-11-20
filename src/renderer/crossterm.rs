@@ -18,6 +18,8 @@ use crate::ui::command::Command;
 use crate::ui::ui_manager::UiManager;
 use crate::editor::Editor;
 
+use crate::log;
+
 pub struct GutterLayer;
 
 impl Layer for GutterLayer {
@@ -92,6 +94,7 @@ impl Layer for GutterLayer {
             }
         }
 
+        
         grid
     }
 }
@@ -117,7 +120,7 @@ impl TextLayer {
             let buffer_row = first_line + screen_row;
 
             if buffer_row >= buffer.lines.len() {
-                Self::render_empty_line(&mut grid.cells[screen_row], bg);
+                Self::render_empty_line(&mut grid.cells[screen_row], config);
                 continue;
             }
 
@@ -135,9 +138,9 @@ impl TextLayer {
         }
     }
 
-    fn render_empty_line(row: &mut [RenderCell], bg: Color) {
+    fn render_empty_line(row: &mut [RenderCell], config: &Config) {
         for cell in row {
-            *cell = RenderCell::blank();
+            *cell = RenderCell::blank()
         }
     }
 
@@ -151,8 +154,9 @@ impl TextLayer {
         let mut col = 0;
 
         for token in tokens {
-            let style_fg = token.style.unwrap_or(config.current_theme().foreground());
-            let style = ContentStyle::new().on(config.current_theme().background()).with(style_fg);
+            let style = ContentStyle::new()
+                .on(config.current_theme().background())
+                .with(config.current_theme().foreground());
 
             let mut logical_col = token.offset;
 
@@ -163,7 +167,7 @@ impl TextLayer {
 
                 row[screen_col] = RenderCell { ch, style, transparent: false };
 
-                logical_col += 1;//ch.len_utf8();
+                logical_col += ch.len_utf8();
             }
         }
     }
@@ -213,7 +217,7 @@ impl Composite {
     ) -> Grid<RenderCell> {
 
         let mut out = gutter.clone();
-
+        
         for row in 0..out.rows() {
             out.cells[row].extend_from_slice(&text.cells[row]);
         }
@@ -346,7 +350,7 @@ impl Renderer for CrossTermRenderer {
         let mut final_frame = Grid::new(
             self.size.rows as usize,
             self.size.cols as usize,
-            RenderCell::blank()
+            RenderCell::space(config)
         );
 
         for (id, view) in editor.views() {
@@ -359,8 +363,7 @@ impl Renderer for CrossTermRenderer {
             });
 
             let text = TextLayer::render(editor, &view, ui, config, Rect {
-                x: gutter_width + prev_x,
-                y: prev_y,
+                x: prev_x, y: prev_y,
                 cols: text_width,
                 rows: view.size.rows
             });

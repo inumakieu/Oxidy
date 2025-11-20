@@ -74,6 +74,8 @@ impl Editor {
 
     pub fn open_buffer(&mut self, path: String, content: String, size: Size) {
         let lines: Vec<String> = content
+            .replace("\r\n", "\n")
+            .replace("\r", "\n")
             .split("\n")
             .map(|s| s.to_string())
             .collect();

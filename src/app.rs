@@ -43,8 +43,6 @@ impl App {
 
         let mut keymap = Keymap::new();
 
-        log!("Test");
-
         keymap
             .normal()
                 .map("i", EditorAction::ChangeMode(EditorMode::Insert))
@@ -180,6 +178,6 @@ impl App {
                 
         let root_index = path.rfind("/").unwrap();
         let root_uri = &path[0..root_index];
-        self.lsp.initialize(&root_uri);
+        // self.lsp.initialize(&root_uri);
     }
 }
