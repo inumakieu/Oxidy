@@ -15,6 +15,7 @@ use crate::renderer::Renderer;
 use crate::input::{InputHandler};
 use crate::plugins::config::Config;
 use crate::keymap::Keymap;
+use crate::log;
 
 pub struct App {
     size: Size,
@@ -41,6 +42,8 @@ impl App {
         ui.add(status_bar);
 
         let mut keymap = Keymap::new();
+
+        log!("Test");
 
         keymap
             .normal()
@@ -163,11 +166,10 @@ impl App {
 
         // TODO: Calculate size based on opened buffers
         let buffer_size = Size {
-            cols: self.size.cols.clone() / 2,
+            cols: self.size.cols.clone(),
             rows: self.size.rows.clone() - self.ui.top_offset() as u16
         };
 
-        self.editor.open_buffer(path.clone(), content.clone(), buffer_size.clone());
         self.editor.open_buffer(path.clone(), content, buffer_size);
 
         let status = self.ui.get_mut::<StatusBar>();

@@ -19,6 +19,7 @@ pub mod ui;
 pub mod log_manager;
 pub mod command;
 pub mod keymap;
+pub mod logger;
 
 use crossterm::cursor;
 use crossterm::terminal;
@@ -29,6 +30,15 @@ use app::App;
 use crate::input::CrosstermInput;
 use crate::renderer::crossterm::CrossTermRenderer;
 use crate::types::Size;
+
+#[macro_export]
+macro_rules! log {
+    ($($arg:tt)*) => {{
+        $crate::logger::LOGGER
+            .get_or_init(|| $crate::logger::Logger::new())
+            .log(format!($($arg)*));
+    }};
+}
 
 // Oxidy comment
 fn main() -> io::Result<()> {

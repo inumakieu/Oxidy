@@ -372,15 +372,17 @@ impl Renderer for CrossTermRenderer {
             prev_x += view.size.cols;
         }
 
-        let active_view = editor.active_view().unwrap();
-        let ui_layer = UiLayer::render(editor, &active_view, ui, config, Rect {
-            x: 0, y: 0,
-            cols: self.size.cols,
-            rows: self.size.rows
-        });
+        let active_view = editor.active_view();
+        if let Some(active_view) = active_view {
+            let ui_layer = UiLayer::render(editor, &active_view, ui, config, Rect {
+                x: 0, y: 0,
+                cols: self.size.cols,
+                rows: self.size.rows
+            });
 
-        final_frame = Composite::overlay(&final_frame, &ui_layer);
-        
+            final_frame = Composite::overlay(&final_frame, &ui_layer);
+        }
+
         self.draw_frame(final_frame, config);
 
         if let Some(active_view) = editor.active_view() {
