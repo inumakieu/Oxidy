@@ -20,6 +20,7 @@ use crate::{
     types::Token
 };
 use crate::plugins::theme::Theme;
+use crate::log;
 
 pub enum LspServiceEvent {
     Initialized,
@@ -50,12 +51,17 @@ pub struct LspService {
 
 impl LspService {
     pub fn new(name: String) -> Option<Self> {
-        let mut process = Command::new(name)
+        let split: Vec<&str> = name.split_whitespace().collect();
+        let lsp_name = split[0];
+        let args = &split[1..];
+
+        let mut process = Command::new(lsp_name)
+            .args(args)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
             .spawn()
-            .expect("failed to start rust-analyzer");
+            .unwrap_or_else(|e| panic!("failed to start {}: {}", lsp_name, e));
 
         let stdin = process.stdin.take().unwrap();
         let stdout = process.stdout.take().unwrap();
@@ -110,7 +116,7 @@ impl LspService {
                     } else if let Ok(resp) = serde_json::from_str::<LspDiagnostics>(&text) {
                         // TODO: Show diagnostics
                     } else {
-                        eprintln!("⚠️ Failed to parse LSP response: {}", text);
+                        // eprintln!("⚠️ Failed to parse LSP response: {}", text);
                     }
                 }
             }
@@ -148,6 +154,15 @@ impl LspService {
     pub fn poll(&mut self) -> LspServiceEvent {
         // Try to read any incoming message
         if let Ok(resp_value) = self.receiver.try_recv() {
+            log!("{:?}", resp_value);
+            if resp_value.method.is_some() && resp_value.id.is_none() {
+                let method = resp_value.method.unwrap().as_str();
+
+                // You may want to handle standard ones like "$/progress", etc.
+                // But for now, just ignore all of them.
+                return LspServiceEvent::None;
+            }
+
             match self.state {
                 LspState::Initializing => {
                     if let Some(init_resp) = self.convert_response::<LspResponseResult>(resp_value) {
@@ -196,6 +211,7 @@ impl LspService {
         match result_typed {
             Ok(result) => Some(LspResponse {
                 jsonrpc: value.jsonrpc,
+                method: None,
                 id: value.id,
                 result,
             }),

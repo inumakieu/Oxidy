@@ -5,7 +5,8 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Serialize, Deserialize)]
 pub struct LspResponse<T> {
     pub jsonrpc: String,
-    pub id: i32,
+    pub method: Option<String>,
+    pub id: Option<i32>,
     pub result: T
 }
 
@@ -22,7 +23,7 @@ pub struct LspDiagnosticParams {}
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct LspSemanticResponseResult {
-    pub resultId: String,
+    pub resultId: Option<String>,
     pub data: Vec<i32>
 }
 
@@ -37,6 +38,7 @@ pub struct LspResponseResult {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct LspResponseCapabilities {
+    /*
     pub positionEncoding: String,
     pub textDocumentSync: TextDocumentSync,
     pub selectionRangeProvider: bool,
@@ -60,10 +62,13 @@ pub struct LspResponseCapabilities {
     pub declarationProvider: bool,
     pub workspace: LspWorkspace,
     pub callHierarchyProvider: bool,
+    */
     pub semanticTokensProvider: SemanticTokensProvider,
+    /*
     pub inlayHintProvider: InlayHintProvider,
     pub diagnosticProvider: DiagnosticProvider,
     pub experimental: LspExperimental
+    */
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -103,7 +108,7 @@ pub struct InlayHintProvider {
 pub struct SemanticTokensProvider {
     pub legend: SemanticTokensLegend,
     pub range: bool,
-    pub full: SemanticTokensFull
+    // pub full: SemanticTokensFull
 }
 
 #[derive(Debug, Serialize, Deserialize)]
