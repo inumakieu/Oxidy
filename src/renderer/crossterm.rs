@@ -393,7 +393,7 @@ impl Renderer for CrossTermRenderer {
             let line_length = editor.active_buffer().unwrap().line(cursor_pos.row).unwrap().len();
             
             let mut col = cursor_pos.col.min(line_length);
-            let row = cursor_pos.row  + ui.top_offset()- active_view.scroll.vertical;
+            let mut row = cursor_pos.row  + ui.top_offset()- active_view.scroll.vertical;
 
             if active_view.mode != EditorMode::Normal {
                 let _ = self.output.queue(cursor::SetCursorStyle::BlinkingBar);
@@ -405,7 +405,8 @@ impl Renderer for CrossTermRenderer {
                 let command = ui.get::<Command>();
 
                 if let Some(command) = command {
-                    col = command.command.len();
+                    col = command.cursor;
+                    row = 1;
                 }
             }
 

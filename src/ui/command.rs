@@ -7,6 +7,7 @@ use crate::{types::{RenderCell, Grid}, ui::ui_element::UiElement};
 pub struct Command {
     pub command: String,
     pub shown: bool,
+    pub cursor: usize,
 }
 
 impl Command {
@@ -14,6 +15,7 @@ impl Command {
         Self {
             command: "".to_string(),
             shown: false,
+            cursor: 0
         }
     }
     

@@ -58,6 +58,19 @@ impl Editor {
         match action {
             EditorAction::MoveCursor(dir) => {
                 if let Some(view) = self.views.get_mut(&self.active_view) {
+                    if view.mode == EditorMode::Command {
+                        match dir {
+                            Direction::Left => {
+                                self.event_sender.send(EditorEvent::CommandCursorMoved(-1));
+                            }
+                            Direction::Right => {
+                                self.event_sender.send(EditorEvent::CommandCursorMoved(1));
+                            }
+                            _ => {}
+                        }
+                        return
+                    }
+
                     match dir {
                         Direction::Up => self.move_cursor_up(),
                         Direction::Down => self.move_cursor_down(),
@@ -67,7 +80,7 @@ impl Editor {
                 }
             }
             EditorAction::InsertCommandChar(ch) => {
-                self.event_sender.send(EditorEvent::CommandRequested(ch.to_string()));
+                self.event_sender.send(EditorEvent::CommandCharInserted(*ch));
             }
             EditorAction::InsertChar(ch) => {
                 let view = self.views.get(&self.active_view).unwrap();
@@ -85,6 +98,9 @@ impl Editor {
                         self.move_cursor_right();
                     }
                 }
+            }
+            EditorAction::DeleteCommandChar => {
+                self.event_sender.send(EditorEvent::CommandCharDeleted);
             }
             EditorAction::DeleteChar => {
                 let view = self.views.get_mut(&self.active_view).unwrap();

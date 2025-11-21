@@ -96,6 +96,7 @@ impl Default for Modifiers {
 pub enum EditorAction {
     MoveCursor(Direction),
     InsertCommandChar(char),
+    DeleteCommandChar,
     InsertChar(char),
     DeleteChar,
     InsertNewline,
@@ -112,10 +113,12 @@ pub enum EditorAction {
 #[derive(PartialEq)]
 pub enum EditorEvent {
     CursorMoved(Cursor),
+    CommandCursorMoved(isize),
     BufferOpened(BufferId),
     SaveRequested(BufferId),
     QuitRequested,
-    CommandRequested(String),
+    CommandCharInserted(char),
+    CommandCharDeleted,
     ExecuteCommand,
     ShowCommand,
     HideCommand,

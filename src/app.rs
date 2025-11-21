@@ -65,6 +65,9 @@ impl App {
                 .map("<Right>", EditorAction::MoveCursor(Direction::Right))
                 .map("<Esc>", EditorAction::ChangeMode(EditorMode::Normal));
         keymap.command()
+                .map("<Left>", EditorAction::MoveCursor(Direction::Left))
+                .map("<Right>", EditorAction::MoveCursor(Direction::Right))
+                .map("<Backspace>", EditorAction::DeleteCommandChar)
                 .map("<Enter>", EditorAction::ExecuteCommand)
                 .map("<Esc>", EditorAction::ChangeMode(EditorMode::Normal));
 
@@ -131,11 +134,31 @@ impl App {
                             command.shown = false;
                         }
                     }
-                    EditorEvent::CommandRequested(cmd) => {
+                    EditorEvent::CommandCursorMoved(dir) => {
                         let command = self.ui.get_mut::<Command>();
 
                         if let Some(command) = command {
-                            command.command.push_str(&cmd);
+                            let mut cursor = command.cursor as isize;
+                            command.cursor = (cursor + dir).clamp(0, command.command.len() as isize) as usize;
+                        }
+
+                    }
+                    EditorEvent::CommandCharInserted(ch) => {
+                        let command = self.ui.get_mut::<Command>();
+
+                        if let Some(command) = command {
+                            command.command.insert(command.cursor, ch);
+                            command.cursor += 1;
+                        }
+                    }
+                    EditorEvent::CommandCharDeleted => {
+                        let command = self.ui.get_mut::<Command>();
+
+                        if let Some(command) = command {
+                            if command.cursor > 0 && command.cursor <= command.command.len() {
+                                command.command.remove(command.cursor - 1);
+                                command.cursor -= 1;
+                            }
                         }
                     }
                     EditorEvent::StartLsp(name) => {
@@ -160,6 +183,7 @@ impl App {
                             let name = cmd.remove(0);
                             self.commands.execute(&name, cmd, &mut self.editor);
                             command.command = "".into();
+                            command.cursor = 0;
                             command.shown = false;
                         }
                         self.editor.handle_action(&EditorAction::ChangeMode(EditorMode::Normal));
