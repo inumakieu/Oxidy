@@ -2,6 +2,7 @@ use std::sync::mpsc::{Receiver, channel};
 use std::fs::File;
 use std::io::{self, Read};
 use std::sync::Arc;
+use std::collections::HashMap;
 
 use crate::types::{EditorAction, EditorEvent, EditorMode, Size, Direction};
 use crate::editor::Editor;
@@ -17,20 +18,22 @@ use crate::input::{InputHandler};
 use crate::plugins::config::Config;
 use crate::keymap::Keymap;
 use crate::log;
+use crate::KeyRepeatState;
 
 pub struct App {
-    size: Size,
-    editor: Editor,
-    commands: CommandManager,
-    keymap: Keymap,
-    plugins: PluginManager,
-    lsp: Option<LspService>,
-    ui: UiManager,
-    renderer: Box<dyn Renderer>,
-    input: Box<dyn InputHandler>,
-    config: Config,
+    pub size: Size,
+    pub editor: Editor,
+    pub commands: CommandManager,
+    pub keymap: Keymap,
+    pub plugins: PluginManager,
+    pub lsp: Option<LspService>,
+    pub ui: UiManager,
+    pub renderer: Box<dyn Renderer>,
+    pub input: Box<dyn InputHandler>,
+    pub config: Config,
+    pub key_repeat: KeyRepeatState,
 
-    event_receiver: Receiver<EditorEvent>,
+    pub event_receiver: Receiver<EditorEvent>,
 }
 
 impl App {
@@ -74,6 +77,10 @@ impl App {
 
         let config = Config::default();
 
+        let key_repeat = KeyRepeatState {
+            last_movement: None
+        };
+
         let (event_sender, event_receiver) = channel();
 
         let editor = Editor::new(event_sender);
@@ -92,6 +99,7 @@ impl App {
             renderer,
             input,
             config,
+            key_repeat,
 
             event_receiver
         }
@@ -100,102 +108,107 @@ impl App {
     pub fn run(&mut self) {
         self.register_commands();
         loop {
-            self.handle_input_event();
-            
-            self.poll_lsp_events();
-            self.poll_plugin_events();
-
-            while let Ok(event) = self.event_receiver.try_recv() {
-                match event {
-                    EditorEvent::QuitRequested => { 
-                        println!("Quit Requested.");
-                        return;
-                    }
-                    EditorEvent::SaveRequested(_) => {
-                        if let Some(lsp) = self.lsp.as_mut() {
-                            let buffer = self.editor.active_buffer();
-                            if let Some(buffer) = buffer {
-                                lsp.set_state(LspState::FileOpened);
-                                lsp.request_semantic_tokens(&buffer);
-                            }
-                        }
-                    }
-                    EditorEvent::ShowCommand => {
-                        let command = self.ui.get_mut::<Command>();
-
-                        if let Some(command) = command {
-                            command.shown = true;
-                        }
-                    }
-                    EditorEvent::HideCommand => {
-                        let command = self.ui.get_mut::<Command>();
-
-                        if let Some(command) = command {
-                            command.shown = false;
-                        }
-                    }
-                    EditorEvent::CommandCursorMoved(dir) => {
-                        let command = self.ui.get_mut::<Command>();
-
-                        if let Some(command) = command {
-                            let mut cursor = command.cursor as isize;
-                            command.cursor = (cursor + dir).clamp(0, command.command.len() as isize) as usize;
-                        }
-
-                    }
-                    EditorEvent::CommandCharInserted(ch) => {
-                        let command = self.ui.get_mut::<Command>();
-
-                        if let Some(command) = command {
-                            command.command.insert(command.cursor, ch);
-                            command.cursor += 1;
-                        }
-                    }
-                    EditorEvent::CommandCharDeleted => {
-                        let command = self.ui.get_mut::<Command>();
-
-                        if let Some(command) = command {
-                            if command.cursor > 0 && command.cursor <= command.command.len() {
-                                command.command.remove(command.cursor - 1);
-                                command.cursor -= 1;
-                            }
-                        }
-                    }
-                    EditorEvent::StartLsp(name) => {
-                        self.lsp = LspService::new(name);
-                        if let Some(lsp) = self.lsp.as_mut() {
-                            let path = self.editor.active_buffer().unwrap().path.clone();
-
-                            let root_index = path.rfind("/").unwrap();
-                            let root_uri = &path[0..root_index];
-                            lsp.initialize(&root_uri);
-                        }
-                    }
-                    EditorEvent::ExecuteCommand => {
-                        let command = self.ui.get_mut::<Command>();
-
-                        if let Some(command) = command {
-                            let mut cmd: Vec<String> = command.command.clone()
-                                .split(" ")
-                                .map(|s| s.to_string())
-                                .collect();
-                            
-                            let name = cmd.remove(0);
-                            self.commands.execute(&name, cmd, &mut self.editor);
-                            command.command = "".into();
-                            command.cursor = 0;
-                            command.shown = false;
-                        }
-                        self.editor.handle_action(&EditorAction::ChangeMode(EditorMode::Normal));
-                    }
-                    _ => {}
-                }
-            }
-
-            self.renderer.begin_frame();
-            self.renderer.draw_buffer(&self.editor, &self.ui, &self.config);
-            self.renderer.end_frame();
+            if !self.step() { break }
         }
+    }
+
+    pub fn step(&mut self) -> bool {
+        self.handle_input_event();
+            
+        self.poll_lsp_events();
+        self.poll_plugin_events();
+
+        while let Ok(event) = self.event_receiver.try_recv() {
+            match event {
+                EditorEvent::QuitRequested => { 
+                    return false;
+                }
+                EditorEvent::SaveRequested(_) => {
+                    if let Some(lsp) = self.lsp.as_mut() {
+                        let buffer = self.editor.active_buffer();
+                        if let Some(buffer) = buffer {
+                            lsp.set_state(LspState::FileOpened);
+                            lsp.request_semantic_tokens(&buffer);
+                        }
+                    }
+                }
+                EditorEvent::ShowCommand => {
+                    let command = self.ui.get_mut::<Command>();
+
+                    if let Some(command) = command {
+                        command.shown = true;
+                    }
+                }
+                EditorEvent::HideCommand => {
+                    let command = self.ui.get_mut::<Command>();
+
+                    if let Some(command) = command {
+                        command.shown = false;
+                    }
+                }
+                EditorEvent::CommandCursorMoved(dir) => {
+                    let command = self.ui.get_mut::<Command>();
+
+                    if let Some(command) = command {
+                        let mut cursor = command.cursor as isize;
+                        command.cursor = (cursor + dir).clamp(0, command.command.len() as isize) as usize;
+                    }
+
+                }
+                EditorEvent::CommandCharInserted(ch) => {
+                    let command = self.ui.get_mut::<Command>();
+
+                    if let Some(command) = command {
+                        command.command.insert(command.cursor, ch);
+                        command.cursor += 1;
+                    }
+                }
+                EditorEvent::CommandCharDeleted => {
+                    let command = self.ui.get_mut::<Command>();
+
+                    if let Some(command) = command {
+                        if command.cursor > 0 && command.cursor <= command.command.len() {
+                            command.command.remove(command.cursor - 1);
+                            command.cursor -= 1;
+                        }
+                    }
+                }
+                EditorEvent::StartLsp(name) => {
+                    self.lsp = LspService::new(name);
+                    if let Some(lsp) = self.lsp.as_mut() {
+                        let path = self.editor.active_buffer().unwrap().path.clone();
+
+                        let root_index = path.rfind("/").unwrap();
+                        let root_uri = &path[0..root_index];
+                        lsp.initialize(&root_uri);
+                    }
+                }
+                EditorEvent::ExecuteCommand => {
+                    let command = self.ui.get_mut::<Command>();
+
+                    if let Some(command) = command {
+                        let mut cmd: Vec<String> = command.command.clone()
+                            .split(" ")
+                            .map(|s| s.to_string())
+                            .collect();
+                        
+                        let name = cmd.remove(0);
+                        self.commands.execute(&name, cmd, &mut self.editor);
+                        command.command = "".into();
+                        command.cursor = 0;
+                        command.shown = false;
+                    }
+                    self.editor.handle_action(&EditorAction::ChangeMode(EditorMode::Normal));
+                }
+                _ => {}
+            }
+        }
+
+        self.renderer.begin_frame();
+        self.renderer.draw_buffer(&self.editor, &self.ui, &self.config);
+        self.renderer.end_frame();
+
+        true
     }
 
     fn handle_input_event(&mut self) {

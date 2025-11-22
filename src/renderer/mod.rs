@@ -13,6 +13,8 @@ pub trait Renderer {
     fn draw_buffer(&mut self, editor: &Editor, ui: &UiManager, config: &Config);
     fn end_frame(&mut self);
     fn resize(&mut self, new_size: Size);
+
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
 }
 
 pub trait Layer {

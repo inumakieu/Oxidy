@@ -4,6 +4,10 @@ use wgpu_glyph::{GlyphBrushBuilder, Section, Text, ab_glyph, GlyphBrush};
 use wgpu::CompositeAlphaMode;
 use wgpu::util::StagingBelt;
 use winit::dpi::PhysicalSize;
+use wgpu::util::BufferInitDescriptor;
+use wgpu::BufferUsages;
+use wgpu_glyph::ab_glyph::Font;
+use wgpu_glyph::ab_glyph::ScaleFont;
 
 use std::sync::Arc;
 
@@ -22,10 +26,33 @@ pub struct WgpuRenderer {
     pub queue: Queue,
     pub staging_belt: StagingBelt,
     pub glyph_brush: GlyphBrush<()>,
+    font: ab_glyph::FontArc,
+    font_scale: f32,
     pub render_format: TextureFormat,
 
-    pub size: PhysicalSize<u32>
+    pub size: PhysicalSize<u32>,
+
+    // Cursor resources
+    pub cursor_pipeline: wgpu::RenderPipeline,
+    pub cursor_vertex_buffer: wgpu::Buffer,
 }
+
+struct CursorVertex {
+    pos: [f32; 2],
+}
+
+const CURSOR_WGSL: &str = r#"
+@vertex
+fn vs_main(@location(0) pos: vec2<f32>) -> @builtin(position) vec4<f32> {
+    return vec4<f32>(pos, 0.0, 1.0);
+}
+
+@fragment
+fn fs_main() -> @location(0) vec4<f32> {
+    // cursor color (RGBA linear)
+    return vec4<f32>(0.95, 0.95, 0.95, 1.0);
+}
+"#;
 
 impl WgpuRenderer {
     pub fn new(window: &Arc<Window>) -> Self {
@@ -70,13 +97,25 @@ impl WgpuRenderer {
         );
 
         // Prepare glyph_brush
-        let inconsolata = ab_glyph::FontArc::try_from_slice(include_bytes!(
+        let font = ab_glyph::FontArc::try_from_slice(include_bytes!(
             "../JetBrainsMono-Regular.ttf"
         )).expect("Could not prepare font glyph_brush.");
 
-        let mut glyph_brush = GlyphBrushBuilder::using_font(inconsolata)
+
+        let mut glyph_brush = GlyphBrushBuilder::using_font(font.clone())
             .build(&device, render_format);
 
+        // Prepare cursor
+        let cursor_pipeline = Self::create_cursor_pipeline(&device, render_format);
+
+        // create an initially-empty vertex buffer sized for 6 vertices (2 floats each)
+        let vb_size = (6 * 2 * std::mem::size_of::<f32>()) as wgpu::BufferAddress;
+        let cursor_vertex_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Cursor VB"),
+            size: vb_size,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
 
         Self {
             surface,
@@ -85,9 +124,131 @@ impl WgpuRenderer {
             queue,
             staging_belt,
             glyph_brush,
+            font,
+            font_scale: 26.0,
             render_format,
-            size: inner_size
+            size: inner_size,
+
+            cursor_pipeline,
+            cursor_vertex_buffer
         }
+    }
+
+    fn create_cursor_pipeline(device: &Device, surface_format: TextureFormat) -> wgpu::RenderPipeline {
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Cursor shader"),
+            source: wgpu::ShaderSource::Wgsl(CURSOR_WGSL.into()),
+        });
+
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Cursor pipeline layout"),
+            bind_group_layouts: &[],
+            push_constant_ranges: &[],
+        });
+
+        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Cursor pipeline"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vs_main"),
+                buffers: &[wgpu::VertexBufferLayout {
+                    array_stride: (2 * std::mem::size_of::<f32>()) as wgpu::BufferAddress,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &[
+                        wgpu::VertexAttribute {
+                            offset: 0,
+                            shader_location: 0,
+                            format: wgpu::VertexFormat::Float32x2,
+                        },
+                    ],
+                }],
+                compilation_options: wgpu::PipelineCompilationOptions::default()
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: surface_format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: wgpu::PipelineCompilationOptions::default()
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                ..Default::default()
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+            cache: None
+        })
+    }
+
+    /// Update cursor vertex buffer for this frame.
+    /// x_px, y_top_px, y_bot_px and width_px are in *pixels* relative to the top-left of the surface.
+    /// This function converts to NDC and uploads the 6-vertex quad to the GPU using queue.write_buffer.
+    fn update_cursor_buffer(&mut self, x_px: f32, y_top_px: f32, y_bot_px: f32, width_px: f32) {
+        let w = self.size.width as f32;
+        let h = self.size.height as f32;
+
+        // Convert to NDC
+        let x1 = (x_px / w) * 2.0 - 1.0;
+        let x2 = ((x_px + width_px) / w) * 2.0 - 1.0;
+
+        // y in NDC: 1.0 top -> -1.0 bottom, so invert
+        let y1 = 1.0 - (y_top_px / h) * 2.0;
+        let y2 = 1.0 - (y_bot_px / h) * 2.0;
+
+        // 6 vertices (triangle list) flattened into f32 vector (x,y pairs)
+        let raw: [f32; 12] = [
+            x1, y1,
+            x2, y1,
+            x1, y2,
+
+            x1, y2,
+            x2, y1,
+            x2, y2,
+        ];
+
+        // Write the bytes to the buffer
+        let bytes = unsafe {
+            std::slice::from_raw_parts(
+                raw.as_ptr() as *const u8,
+                raw.len() * std::mem::size_of::<f32>(),
+            )
+        };
+        self.queue.write_buffer(&self.cursor_vertex_buffer, 0, bytes);
+    }
+
+    pub fn caret_x_for_line(&self, line: &str, col: usize, start_x: f32) -> f32 {
+        // Make a scaled view of the font at the pixel size you use for glyph_brush.
+        // font_scale should be the same value you used when creating Sections (.with_scale(...)).
+        let scaled_font = self.font.as_scaled(self.font_scale);
+
+        let mut x = start_x;
+        let mut prev_gid: Option<ab_glyph::GlyphId> = None;
+
+        for (i, ch) in line.chars().enumerate() {
+            if i == col {
+                break;
+            }
+
+            let gid = scaled_font.glyph_id(ch);
+
+            // Apply kerning between previous glyph and this glyph (if any)
+            if let Some(prev) = prev_gid {
+                x += scaled_font.kern(prev, gid);
+            }
+
+            // Advance for this glyph (already scaled to pixels)
+            x += scaled_font.h_advance(gid);
+
+            prev_gid = Some(gid);
+        }
+
+        x
     }
 }
 
@@ -139,16 +300,22 @@ impl Renderer for WgpuRenderer {
             );
         }
 
-        self.glyph_brush.queue(Section {
-            screen_position: (30.0, 30.0),
-            bounds: (self.size.width as f32, self.size.height as f32),
-            text: vec![
-                Text::new("let variable = String(\"Oxidy!!!\")")
-                    .with_color([fg.r as f32, fg.g as f32, fg.b as f32, fg.a as f32])
-                    .with_scale(26.0),
-            ],
-            ..Section::default()
-        });
+        let buf_view = editor.active_view().unwrap().clone();
+
+        for i in 0..(buf_view.size.rows as usize) {
+            if let Some(line) = editor.active_buffer().unwrap().lines.get(i + buf_view.visible_top()).clone() {
+                self.glyph_brush.queue(Section {
+                    screen_position: (30.0, 30.0 + (28 * i) as f32),
+                    bounds: (self.size.width as f32, self.size.height as f32),
+                    text: vec![
+                        Text::new(line)
+                            .with_color([fg.r as f32, fg.g as f32, fg.b as f32, fg.a as f32])
+                            .with_scale(26.0),
+                    ],
+                    ..Section::default()
+                });
+            }
+        }
 
         // Draw the text!
         self.glyph_brush
@@ -162,6 +329,46 @@ impl Renderer for WgpuRenderer {
             )
             .expect("Draw queued");
 
+        {
+            let cursor_width_px = 2.0_f32;
+            let mut cursor_x_px = 30.0;
+
+            let font = &self.font;       // the same FontArc you gave to glyph_brush
+            let scale = self.font_scale; // the same scale as your glyph sections
+
+            if let Some(buffer) = editor.active_buffer() {
+                if let Some(line) = buffer.lines.get(buf_view.cursor.row) {
+                    cursor_x_px = self.caret_x_for_line(line, buf_view.cursor.col, 30.0);
+                }
+            }
+            let line_top = 30.0 + (28.0 * (buf_view.cursor.row - buf_view.scroll.vertical) as f32); // Replace: compute Y for the caret's line
+            let line_bottom = line_top + 26.0; // approximate line height (scale 26.0 in glyph_brush)
+
+            // Update GPU vertex buffer for this frame
+            self.update_cursor_buffer(cursor_x_px, line_top, line_bottom, cursor_width_px);
+
+            // Begin cursor render pass (draw the updated buffer)
+            let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Cursor pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,   // IMPORTANT: do NOT clear; keep text
+                        store: wgpu::StoreOp::Store,
+                    },
+                    depth_slice: None
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+
+            rpass.set_pipeline(&self.cursor_pipeline);
+            rpass.set_vertex_buffer(0, self.cursor_vertex_buffer.slice(..));
+            rpass.draw(0..6, 0..1);
+        }
+
         // Submit the work!
         self.staging_belt.finish();
         self.queue.submit(Some(encoder.finish()));
@@ -173,6 +380,10 @@ impl Renderer for WgpuRenderer {
     fn end_frame(&mut self) {}
     
     fn resize(&mut self, new_size: Size) {}
+
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        return self
+    }
 }
 
 pub fn hex_to_wgpu_color(hex: &str) -> wgpu::Color {

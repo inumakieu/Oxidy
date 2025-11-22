@@ -423,6 +423,10 @@ impl Renderer for CrossTermRenderer {
     fn resize(&mut self, new_size: Size) {
         self.size = new_size;
     }
+
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        return self
+    }
 }
 
 impl Drop for CrossTermRenderer {

@@ -30,12 +30,14 @@ use app::App;
 
 use wgpu::CompositeAlphaMode;
 use wgpu_glyph::{GlyphBrushBuilder, Section, Text, ab_glyph};
+use winit::keyboard::{PhysicalKey, KeyCode};
+use winit::event::ElementState;
 
 use crate::input::{InputHandler, CrosstermInput, WgpuInput};
 use crate::renderer::Renderer;
 use crate::renderer::wgpu_renderer::WgpuRenderer;
 use crate::renderer::crossterm::CrossTermRenderer;
-use crate::types::Size;
+use crate::types::{Size, EditorAction, Direction};
 
 use crate::editor::Editor;
 use crate::plugins::config::Config;
@@ -50,10 +52,180 @@ macro_rules! log {
     }};
 }
 
+use std::time::{Instant, Duration};
+use std::collections::HashMap;
+
+struct KeyRepeatState {
+    last_movement: Option<HashMap<winit::keyboard::KeyCode, Instant>>,
+}
+
+fn gui_main(file_paths: Vec<String>) -> io::Result<()> {
+    env_logger::init();
+
+    let event_loop = winit::event_loop::EventLoop::new().unwrap();
+
+    let window = Arc::new(
+        winit::window::WindowBuilder::new()
+            .with_title("Oxidy")
+            .with_resizable(true)
+            .with_blur(true)
+            .build(&event_loop)
+            .unwrap(),
+    );
+
+    let mut wgpu_renderer = WgpuRenderer::new(&window);
+
+    window.request_redraw();
+
+    let size = Size { cols: (wgpu_renderer.size.width as f32 / 28f32) as u16, rows: (wgpu_renderer.size.height as f32 / 28f32) as u16 };
+
+    let input = Box::new(WgpuInput::new());
+    
+    let mut app = App::new(size, Box::new(wgpu_renderer), input);
+
+    if let Some(input_file) = file_paths.first() {
+        app.open_file(input_file.clone());
+    }
+
+    event_loop
+        .run(move |event, elwt| {
+            match event {
+                winit::event::Event::WindowEvent {
+                    event: winit::event::WindowEvent::CloseRequested,
+                    ..
+                } => elwt.exit(),
+                winit::event::Event::WindowEvent {
+                    event: winit::event::WindowEvent::Resized(new_size),
+                    ..
+                } => {
+                    app.renderer.resize(
+                        Size {
+                            cols: new_size.width as u16,
+                            rows: new_size.height as u16
+                        }
+                    );
+
+                    if let Some(wgpu_renderer) = app.renderer.as_any_mut().downcast_mut::<WgpuRenderer>() {
+                        wgpu_renderer.surface.configure(
+                            &wgpu_renderer.device,
+                            &wgpu::SurfaceConfiguration {
+                                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                                format: wgpu_renderer.render_format,
+                                width: wgpu_renderer.size.width,
+                                height: wgpu_renderer.size.height,
+                                present_mode: wgpu::PresentMode::AutoVsync,
+                                alpha_mode: CompositeAlphaMode::Auto,
+                                view_formats: vec![wgpu_renderer.render_format],
+                                desired_maximum_frame_latency: 2,
+                            },
+                        );
+                    }
+                    
+                }
+                winit::event::Event::WindowEvent {
+                    event: winit::event::WindowEvent::RedrawRequested,
+                    ..
+                } => {
+                    app.step();
+                }
+                winit::event::Event::WindowEvent {
+                    event: winit::event::WindowEvent::KeyboardInput { event: input_data, .. },
+                    ..
+                } => {
+                    let key = match input_data.physical_key {
+                        PhysicalKey::Code(k) => k,
+                        _ => return,
+                    };
+
+                    // Initialize per-key tracking map if not already present
+                    if app.key_repeat.last_movement.is_none() {
+                        app.key_repeat.last_movement = Some(HashMap::new());
+                    }
+                    let last_movement = app.key_repeat.last_movement.as_mut().unwrap();
+
+                    const REPEAT_DELAY: Duration = Duration::from_millis(300);
+                    const REPEAT_RATE: Duration  = Duration::from_millis(40);
+
+                    match input_data.state {
+                        ElementState::Pressed => {
+                            let now = Instant::now();
+                            let allow_move = match last_movement.get(&key) {
+                                Some(last) => now.duration_since(*last) >= REPEAT_RATE,
+                                None => true, // first press
+                            };
+
+                            if allow_move {
+                                match key {
+                                    KeyCode::ArrowUp    => app.editor.handle_action(&EditorAction::MoveCursor(Direction::Up)),
+                                    KeyCode::ArrowDown  => app.editor.handle_action(&EditorAction::MoveCursor(Direction::Down)),
+                                    KeyCode::ArrowLeft  => app.editor.handle_action(&EditorAction::MoveCursor(Direction::Left)),
+                                    KeyCode::ArrowRight => app.editor.handle_action(&EditorAction::MoveCursor(Direction::Right)),
+                                    _ => {}
+                                }
+
+                                last_movement.insert(key, now);
+                                window.request_redraw();
+                            }
+                        }
+
+                        ElementState::Released => {
+                            last_movement.remove(&key);
+                        }
+                    }                
+                }
+                _ => {}
+            }
+        })
+        .unwrap();
+
+    Ok(())
+}
+
+fn tui_main(file_paths: Vec<String>) -> io::Result<()> {
+    let term_size = terminal::size().expect("Size could not be determined.");
+    let size = Size { cols: term_size.0, rows: term_size.1 };
+        
+    let input = Box::new(CrosstermInput::new());
+
+    let renderer = Box::new(CrossTermRenderer::new(size.clone()));
+
+    let mut app = App::new(size, renderer, input);
+
+    if let Some(input_file) = file_paths.first() {
+        app.open_file(input_file.clone());
+    }
+    app.run();
+
+    Ok(())
+}
+
+struct CliArgs {
+    gui: bool,
+    files: Vec<String>,
+}
+
+fn parse_args() -> CliArgs {
+    let mut gui = false;
+    let mut files = Vec::new();
+
+    let mut args = std::env::args().skip(1); // skip program name
+
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "-g" | "--gui" => gui = true,
+            _ if arg.starts_with('-') => {
+                eprintln!("Unknown option: {}", arg);
+            }
+            _ => files.push(arg),
+        }
+    }
+
+    CliArgs { gui, files }
+}
+
 // Oxidy comment
 fn main() -> io::Result<()> {
-    let mut args = env::args();
-    args.next();
+    let cli = parse_args();
 
     panic::set_hook(Box::new(|info| {
         let _ = std::io::stdout().execute(EndSynchronizedUpdate);
@@ -85,92 +257,8 @@ fn main() -> io::Result<()> {
         }
     }));
 
-    // GUI Rendering
-    let gui_mode = false;
+    if cli.gui { gui_main(cli.files)?; }
+    else { tui_main(cli.files)?; }
 
-    let renderer: Box<dyn Renderer>;
-    let input: Box<dyn InputHandler>;
-    let size: Size;
-
-    if gui_mode {
-        env_logger::init();
-
-        let event_loop = winit::event_loop::EventLoop::new().unwrap();
-
-        let window = Arc::new(
-            winit::window::WindowBuilder::new()
-                .with_title("Oxidy")
-                .with_resizable(true)
-                .with_blur(true)
-                .build(&event_loop)
-                .unwrap(),
-        );
-
-        let mut wgpu_renderer = WgpuRenderer::new(&window);
-
-        window.request_redraw();
-
-        size = Size { cols: wgpu_renderer.size.width as u16, rows: wgpu_renderer.size.height as u16 };
-
-        input = Box::new(WgpuInput::new());
-        // renderer = Box::new(wgpu_renderer);
-
-        event_loop
-        .run(move |event, elwt| {
-            match event {
-                winit::event::Event::WindowEvent {
-                    event: winit::event::WindowEvent::CloseRequested,
-                    ..
-                } => elwt.exit(),
-                winit::event::Event::WindowEvent {
-                    event: winit::event::WindowEvent::Resized(new_size),
-                    ..
-                } => {
-                    wgpu_renderer.size = new_size;
-
-                    wgpu_renderer.surface.configure(
-                        &wgpu_renderer.device,
-                        &wgpu::SurfaceConfiguration {
-                            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-                            format: wgpu_renderer.render_format,
-                            width: wgpu_renderer.size.width,
-                            height: wgpu_renderer.size.height,
-                            present_mode: wgpu::PresentMode::AutoVsync,
-                            alpha_mode: CompositeAlphaMode::Auto,
-                            view_formats: vec![wgpu_renderer.render_format],
-                            desired_maximum_frame_latency: 2,
-                        },
-                    );
-                }
-                winit::event::Event::WindowEvent {
-                    event: winit::event::WindowEvent::RedrawRequested,
-                    ..
-                } => {
-                    let config = Config::default();
-                    let (event_sender, event_receiver) = std::sync::mpsc::channel();
-                    let ui = UiManager::new();
-                    let editor = Editor::new(event_sender);
-                    wgpu_renderer.draw_buffer(&editor, &ui, &config);
-                }
-                _ => {}
-            }
-        })
-        .unwrap()
-    } else {
-        let term_size = terminal::size().expect("Size could not be determined.");
-        size = Size { cols: term_size.0, rows: term_size.1 };
-        
-        input = Box::new(CrosstermInput::new());
-
-        renderer = Box::new(CrossTermRenderer::new(size.clone()));
-
-        let mut app = App::new(size, renderer, input);
-    
-        if let Some(input_file) = args.next() {
-            app.open_file(input_file);
-        }
-        app.run();
-    }
-    
     Ok(())
 }

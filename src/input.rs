@@ -36,7 +36,7 @@ pub struct CrosstermInput;
 
 impl InputHandler for CrosstermInput {
     fn poll(&mut self) -> io::Result<Option<InputEvent>> {
-        if poll(Duration::from_millis(0))? {
+        if poll(Duration::from_millis(16))? {
             match read()? {
                 Event::Key(e) => Ok(Some(self.translate_key_event(e))),
                 Event::Mouse(e) => {
