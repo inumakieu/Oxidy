@@ -8,6 +8,7 @@ use wgpu::util::BufferInitDescriptor;
 use wgpu::BufferUsages;
 use wgpu_glyph::ab_glyph::Font;
 use wgpu_glyph::ab_glyph::ScaleFont;
+use wgpu_glyph::Layout;
 
 use std::sync::Arc;
 
@@ -270,12 +271,11 @@ impl Renderer for WgpuRenderer {
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
 
-
         let theme = config.current_theme();
 
         let bg = hex_to_wgpu_color(&theme.Background.unwrap_or_default());
         let fg = hex_to_wgpu_color(&theme.Foreground.unwrap_or_default());
-        // Clear frame
+        
         {
             let _ = encoder.begin_render_pass(
                 &wgpu::RenderPassDescriptor {
@@ -302,11 +302,14 @@ impl Renderer for WgpuRenderer {
 
         let buf_view = editor.active_view().unwrap().clone();
 
+        let layout = Layout::default_single_line();
+
         for i in 0..(buf_view.size.rows as usize) {
             if let Some(line) = editor.active_buffer().unwrap().lines.get(i + buf_view.visible_top()).clone() {
                 self.glyph_brush.queue(Section {
                     screen_position: (30.0, 30.0 + (28 * i) as f32),
                     bounds: (self.size.width as f32, self.size.height as f32),
+                    layout: layout,
                     text: vec![
                         Text::new(line)
                             .with_color([fg.r as f32, fg.g as f32, fg.b as f32, fg.a as f32])
@@ -317,7 +320,6 @@ impl Renderer for WgpuRenderer {
             }
         }
 
-        // Draw the text!
         self.glyph_brush
             .draw_queued(
                 &self.device,

@@ -92,10 +92,18 @@ impl Editor {
                             .map(|(i, _)| i)
                             .unwrap_or_else(|| line.len());
                         line.insert(byte_idx, *ch);
-
-                        view.highlighter.shift_line_tokens(view.cursor.row, view.cursor.col, 1);
-
+                        buffer.version += 1;
+                        view.highlighter.apply_edit(
+                            view.cursor.row,
+                            view.cursor.col,
+                            0,
+                            0,
+                            0,
+                            1
+                        );
                         self.move_cursor_right();
+
+                        self.event_sender.send(EditorEvent::RequestDeltaSemantics);
                     }
                 }
             }
@@ -119,6 +127,15 @@ impl Editor {
                             prev.push_str(curr);
                             buffer.lines.remove(line_index);
                             move_up = true;
+
+                            view.highlighter.apply_edit(
+                                view.cursor.row,
+                                view.cursor.col,
+                                1,
+                                0,
+                                0,
+                                0
+                            );
                         }
                     } else if let Some(line) = buffer.lines.get_mut(line_index) {
                         if view.cursor.col <= line.len() {
@@ -128,13 +145,23 @@ impl Editor {
                                 .unwrap_or_else(|| line.len());
                             line.remove(byte_idx);
                             new_col -= 1;
+
+                            view.highlighter.apply_edit(
+                                view.cursor.row,
+                                view.cursor.col,
+                                0,
+                                1,
+                                0,
+                                0
+                            );
                         }
                     }
-
-                    view.highlighter.shift_line_tokens(view.cursor.row, view.cursor.col, -1);
+                    buffer.version += 1; 
                     
                     view.cursor.col = new_col;
                     if move_up { self.move_cursor_up(); }
+
+                    self.event_sender.send(EditorEvent::RequestDeltaSemantics);
                 }
             }
             EditorAction::InsertNewline => {
@@ -157,9 +184,21 @@ impl Editor {
                         buffer.lines.insert(view.cursor.row, line);
                         buffer.lines.insert(view.cursor.row + 1, String::new());
                     }
+                    buffer.version += 1;
+
+                    view.highlighter.apply_edit(
+                        view.cursor.row,
+                        view.cursor.col,
+                        0,
+                        0,
+                        1,
+                        0
+                    );
 
                     view.cursor.row += 1;
                     view.cursor.col = 0;
+
+                    self.event_sender.send(EditorEvent::RequestDeltaSemantics);
                 }
             }
             EditorAction::ChangeMode(mode) => {

@@ -22,9 +22,32 @@ pub struct LspDiagnostics {
 pub struct LspDiagnosticParams {}
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct LspSemanticResponseResult {
+#[serde(untagged)]
+pub enum LspSemanticResponseResult {
+    Full(SemanticTokensFullData),
+    Delta(SemanticTokensDeltaData),
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct SemanticTokensFullData {
     pub resultId: Option<String>,
-    pub data: Vec<i32>
+    pub data: Vec<i32>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct SemanticTokensDeltaData {
+    pub resultId: Option<String>,
+    pub edits: Vec<SemanticTokensDeltaEdit>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct SemanticTokensDeltaEdit {
+    pub start: u32,
+    pub deleteCount: u32,
+
+    // May be omitted
+    #[serde(default)]
+    pub data: Vec<i32>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -108,7 +131,7 @@ pub struct InlayHintProvider {
 pub struct SemanticTokensProvider {
     pub legend: SemanticTokensLegend,
     pub range: bool,
-    // pub full: SemanticTokensFull
+    pub full: Option<SemanticTokensFull>
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -118,8 +141,10 @@ pub struct SemanticTokensLegend {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct SemanticTokensFull {
-    pub delta: bool
+#[serde(untagged)]
+pub enum SemanticTokensFull {
+    Boolean(bool),
+    Options { delta: Option<bool> },
 }
 
 #[derive(Debug, Serialize, Deserialize)]

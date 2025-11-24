@@ -4,6 +4,9 @@ use std::io::{self, Read};
 use std::sync::Arc;
 use std::collections::HashMap;
 
+use std::thread;
+use std::time::Duration;
+
 use crate::types::{EditorAction, EditorEvent, EditorMode, Size, Direction};
 use crate::editor::Editor;
 use crate::command::{self, CommandManager};
@@ -125,11 +128,8 @@ impl App {
                 }
                 EditorEvent::SaveRequested(_) => {
                     if let Some(lsp) = self.lsp.as_mut() {
-                        let buffer = self.editor.active_buffer();
-                        if let Some(buffer) = buffer {
-                            lsp.set_state(LspState::FileOpened);
-                            lsp.request_semantic_tokens(&buffer);
-                        }
+                        let buffer = self.editor.active_buffer().unwrap();
+                        lsp.did_change(&buffer.path, buffer.version, &buffer.text());
                     }
                 }
                 EditorEvent::ShowCommand => {
@@ -181,6 +181,14 @@ impl App {
                         let root_index = path.rfind("/").unwrap();
                         let root_uri = &path[0..root_index];
                         lsp.initialize(&root_uri);
+                    }
+                }
+                EditorEvent::RequestDeltaSemantics => {
+                    if let Some(lsp) = self.lsp.as_mut() {
+                        let buffer = self.editor.active_buffer().unwrap();
+                        lsp.did_change(&buffer.path, buffer.version, &buffer.text());
+                        std::thread::sleep(std::time::Duration::from_millis(10));
+                        lsp.request_semantic_tokens(&buffer);
                     }
                 }
                 EditorEvent::ExecuteCommand => {
@@ -242,7 +250,7 @@ impl App {
                         lsp.open_file(&buffer.path, &buffer.text());
                     }
                 }
-                LspServiceEvent::OpenedFile => {
+                LspServiceEvent::OpenedFile | LspServiceEvent::ReceivedDelta => {
                     let buffer = self.editor.active_buffer();
                     if let Some(buffer) = buffer {
                         lsp.request_semantic_tokens(&buffer);

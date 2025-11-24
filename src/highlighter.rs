@@ -97,6 +97,7 @@ impl Highlighter {
                     for cap in re.captures_iter(line) {
                         if let Some(cap) = cap.get(1) {
                             tokens.push(Token {
+                                row: index,
                                 text: cap.as_str().to_string(),
                                 offset: cap.start(),
                                 style: Some(self.colors[key].clone()),
@@ -106,6 +107,7 @@ impl Highlighter {
                 }
             } else {
                 tokens.push(Token {
+                    row: index,
                     text: line.to_string(),
                     offset: 0,
                     style: Some(self.colors["fg"].clone()),
@@ -124,6 +126,7 @@ impl Highlighter {
                 if !buffer.is_empty() {
                     let start = i - buffer.len();
                     found_tokens.push(Token {
+                        row: index,
                         text: buffer.clone(),
                         offset: start,
                         style: Some(Color::White),
@@ -144,6 +147,7 @@ impl Highlighter {
             if i == line.len() - 1 && !buffer.is_empty() {
                 let start = i + 1 - buffer.len();
                 found_tokens.push(Token {
+                    row: index,
                     text: buffer.clone(),
                     offset: start,
                     style: Some(Color::White),
@@ -170,6 +174,47 @@ impl Highlighter {
                 }
             }
         }
+        self.cache.borrow_mut().clear();
+    }
+
+    pub fn apply_edit(&self, start_row: usize, start_col: usize, 
+                  deleted_lines: usize, deleted_cols: usize,
+                  inserted_lines: usize, inserted_cols: usize) 
+    {
+        let mut tokens = self.tokens.borrow_mut();
+
+        if deleted_lines > 0 || deleted_cols > 0 {
+            if let Some(line_tokens) = tokens.get_mut(start_row) {
+                line_tokens.retain(|t| t.offset < start_col);
+            }
+
+            for _ in 1..deleted_lines {
+                if start_row + 1 < tokens.len() {
+                    tokens.remove(start_row + 1);
+                }
+            }
+        }
+
+        if let Some(line_tokens) = tokens.get_mut(start_row) {
+            for token in line_tokens.iter_mut() {
+                if token.offset >= start_col {
+                    // Shift by inserted_cols - deleted_cols
+                    let new_offset = token.offset as isize + inserted_cols as isize - deleted_cols as isize;
+                    token.offset = new_offset.max(0) as usize;
+                }
+            }
+        }
+
+        let line_delta = inserted_lines as isize - deleted_lines as isize;
+        if line_delta != 0 {
+            let total_lines = tokens.len();
+            for row_idx in (start_row + 1)..total_lines {
+                if let Some(row_tokens) = tokens.get_mut(row_idx) {
+                    row_tokens.iter_mut().for_each(|t| t.row = (t.row as isize + line_delta) as usize);
+                }
+            }
+        }
+
         self.cache.borrow_mut().clear();
     }
 

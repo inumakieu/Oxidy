@@ -123,6 +123,7 @@ pub enum EditorEvent {
     ShowCommand,
     HideCommand,
     StartLsp(String),
+    RequestDeltaSemantics,
     None
 }
 
@@ -134,6 +135,7 @@ pub struct Location {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Token {
+    pub row: usize,
     pub text: String,
     pub offset: usize,
     pub style: Option<Color>

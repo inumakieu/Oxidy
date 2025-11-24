@@ -18,7 +18,26 @@ pub struct InitializeParams {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct InitializeClientCapabilities {}
+pub struct InitializeClientCapabilities {
+    #[serde(rename = "textDocument")]
+    pub text_document: Option<TextDocumentClientCapabilities>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct TextDocumentClientCapabilities {
+    #[serde(rename = "synchronization")]
+    pub synchronization: Option<TextDocumentSyncClientCapabilities>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct TextDocumentSyncClientCapabilities {
+    #[serde(rename = "didOpen")]
+    pub did_open: bool,
+    #[serde(rename = "didChange")]
+    pub did_change: bool,
+    #[serde(rename = "didClose")]
+    pub did_close: bool,
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct InitializedParams {}

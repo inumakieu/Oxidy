@@ -31,7 +31,8 @@ pub enum BufferLocation {
 #[derive(Debug, Clone)]
 pub struct Buffer {
     pub lines: Vec<String>,
-    pub path: String
+    pub path: String,
+    pub version: u32,
 }
 
 impl Buffer {
@@ -39,6 +40,7 @@ impl Buffer {
         Self {
             lines,
             path,
+            version: 1
         }
     }
 
