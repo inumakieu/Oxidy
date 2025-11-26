@@ -183,36 +183,48 @@ impl Highlighter {
     {
         let mut tokens = self.tokens.borrow_mut();
 
-        if deleted_lines > 0 || deleted_cols > 0 {
+        for i in 0..inserted_lines {
+            tokens.insert(start_row + i, vec![]);
+
+            if !tokens[start_row].is_empty() {
+                let mut line = tokens[start_row].clone();
+                let (left, right) = line.split_at_mut(start_col);
+                
+                if let Some(last) = left.last() {
+                    for token in right.iter_mut() {
+                        token.offset -= last.offset + last.text.len() + 1;
+                    }
+                }
+
+                tokens[start_row] = left.to_vec();
+                tokens[start_row + i] = right.to_vec();
+            }
+            
+        }
+
+        for i in 0..deleted_lines {
+            let mut line = tokens.remove(start_row);
+            // update offsets
+            if let Some(last) = tokens[start_row - 1].last() {
+                for token in line.iter_mut() {
+                    token.offset += last.offset + last.text.len() + 1;
+                }
+            }
+
+            tokens[start_row - 1].extend(line);
+            
+        }
+
+        if deleted_cols > 0 || inserted_cols > 0 {
+            let new_off = (inserted_cols as isize) - (deleted_cols as isize);
             if let Some(line_tokens) = tokens.get_mut(start_row) {
-                line_tokens.retain(|t| t.offset < start_col);
-            }
-
-            for _ in 1..deleted_lines {
-                if start_row + 1 < tokens.len() {
-                    tokens.remove(start_row + 1);
+                for token in line_tokens.iter_mut() {
+                    if token.offset >= start_col {
+                        token.offset = (token.offset as isize + new_off) as usize;
+                    }
                 }
             }
-        }
-
-        if let Some(line_tokens) = tokens.get_mut(start_row) {
-            for token in line_tokens.iter_mut() {
-                if token.offset >= start_col {
-                    // Shift by inserted_cols - deleted_cols
-                    let new_offset = token.offset as isize + inserted_cols as isize - deleted_cols as isize;
-                    token.offset = new_offset.max(0) as usize;
-                }
-            }
-        }
-
-        let line_delta = inserted_lines as isize - deleted_lines as isize;
-        if line_delta != 0 {
-            let total_lines = tokens.len();
-            for row_idx in (start_row + 1)..total_lines {
-                if let Some(row_tokens) = tokens.get_mut(row_idx) {
-                    row_tokens.iter_mut().for_each(|t| t.row = (t.row as isize + line_delta) as usize);
-                }
-            }
+            
         }
 
         self.cache.borrow_mut().clear();
