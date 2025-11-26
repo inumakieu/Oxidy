@@ -167,7 +167,7 @@ impl TextLayer {
 
                 row[screen_col] = RenderCell { ch, style, transparent: false };
 
-                logical_col += ch.len_utf8();
+                logical_col += 1;//ch.len_utf8();
             }
         }
     }

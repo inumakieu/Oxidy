@@ -59,6 +59,8 @@ pub struct LspService {
 
 impl LspService {
     pub fn new(name: String) -> Option<Self> {
+        if name.is_empty() { return None }
+
         let split: Vec<&str> = name.split_whitespace().collect();
         let lsp_name = split[0];
         let args = &split[1..];
