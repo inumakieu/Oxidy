@@ -58,14 +58,10 @@ pub struct LspService {
 }
 
 impl LspService {
-    pub fn new(name: String) -> Option<Self> {
+    pub fn new(name: String, args: Vec<String>) -> Option<Self> {
         if name.is_empty() { return None }
 
-        let split: Vec<&str> = name.split_whitespace().collect();
-        let lsp_name = split[0];
-        let args = &split[1..];
-
-        let mut prcs = Command::new(lsp_name)
+        let mut prcs = Command::new(name)
             .args(args)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())

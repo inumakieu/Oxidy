@@ -176,10 +176,16 @@ impl PluginManager {
         
         let _ = self.engine.eval_ast_with_scope::<()>(&mut scope, &self.ast);
 
-        let script_result: Dynamic = self.engine.eval_with_scope(&mut scope, "oxidy").unwrap();
-        let conf: Config = from_dynamic(&script_result).unwrap();
+        match self.engine.eval_with_scope(&mut scope, "oxidy") {
+            Ok(script_result) => {
+                let conf: Config = from_dynamic(&script_result).unwrap();
 
-        self.config = conf.merge(&self.config);
+                crate::log!("{:?}", conf);
+                self.config = conf.merge(&self.config);
+
+            }
+            Err(error) => crate::log!("Rhai error: {:?}", error)
+        }
     }
 
     pub fn get_current_theme_colors(&self) -> Option<HashMap<String, Color>> {

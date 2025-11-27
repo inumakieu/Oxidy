@@ -117,9 +117,10 @@ impl App {
 
     pub fn step(&mut self) -> bool {
         self.handle_input_event();
-            
-        self.poll_lsp_events();
+        
+        
         self.poll_plugin_events();
+        self.poll_lsp_events();
 
         while let Ok(event) = self.event_receiver.try_recv() {
             match event {
@@ -174,6 +175,7 @@ impl App {
                     }
                 }
                 EditorEvent::StartLsp(name) => {
+                    /*
                     self.lsp = LspService::new(name);
                     if let Some(lsp) = self.lsp.as_mut() {
                         let path = self.editor.active_buffer().unwrap().path.clone();
@@ -182,6 +184,7 @@ impl App {
                         let root_uri = &path[0..root_index];
                         lsp.initialize(&root_uri);
                     }
+                    */
                 }
                 EditorEvent::RequestDeltaSemantics => {
                     if let Some(lsp) = self.lsp.as_mut() {
@@ -270,6 +273,7 @@ impl App {
     }
 
     pub fn open_file(&mut self, path: String) {
+        self.config = self.plugins.config.clone();
         let content = std::fs::read_to_string(&path)
             .expect("Failed to open file");
 
@@ -285,6 +289,26 @@ impl App {
 
         if let Some(status) = status {
             status.file = path.to_string().clone();
+        }
+
+        // autostart lsp if configured
+        let file_type_index = path.to_string().rfind(".");
+        if let Some(file_type_index) = file_type_index {
+            let file_type = &path[file_type_index + 1..];
+            log!("File type: {}", file_type);
+
+            // log!("{:?}", self.config.lsps);
+            if let Some(lsp_config) = self.config.lsps.get(file_type) {
+                log!("Starting lsp.");
+                eprintln!("STARTING.");
+                self.lsp = LspService::new(lsp_config.command.clone(), lsp_config.args.clone());
+            }
+
+            if let Some(lsp) = self.lsp.as_mut() {
+                let root_index = path.rfind("/").unwrap();
+                let root_uri = &path[0..root_index];
+                lsp.initialize(&root_uri);
+            }
         }
     }
 
@@ -309,8 +333,21 @@ impl App {
                     if let Some(subcommand) = args.first() {
                         match subcommand.as_str() {
                             "start" => {
-                                let lsp_name = args[1..].join(" ");
-                                editor.event_sender.send(EditorEvent::StartLsp(lsp_name));
+                                /*
+                                let lsp_name = args[1].clone();
+                                let lsp_args = args[2..].iter().cloned();
+                                
+                                self.lsp = LspService::new(lsp_name, lsp_args);
+                                if let Some(lsp) = self.lsp.as_mut() {
+                                    let path = self.editor.active_buffer().unwrap().path.clone();
+
+                                    let root_index = path.rfind("/").unwrap();
+                                    let root_uri = &path[0..root_index];
+                                    lsp.initialize(&root_uri);
+                                }
+
+                                // editor.event_sender.send(EditorEvent::StartLsp(lsp_name));
+                                */
                             }
                             "end" => {}
                             _ => {}
