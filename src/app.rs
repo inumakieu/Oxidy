@@ -130,7 +130,9 @@ impl App {
                 EditorEvent::SaveRequested(_) => {
                     if let Some(lsp) = self.lsp.as_mut() {
                         let buffer = self.editor.active_buffer().unwrap();
-                        lsp.did_change(&buffer.path, buffer.version, &buffer.text());
+                        // lsp.did_change(&buffer.path, buffer.version, &buffer.text());
+
+                        self.plugins.save_buffer(&buffer);
                     }
                 }
                 EditorEvent::ShowCommand => {
@@ -319,6 +321,18 @@ impl App {
                 description: "Quit Oxidy.".into(),
                 execute: (|editor, args| {
                     editor.event_sender.send(EditorEvent::QuitRequested);
+
+                    Ok(())
+                })
+            }
+        );
+
+        self.commands.register(
+            command::Command {
+                name: "w".into(),
+                description: "Save the current buffer".into(),
+                execute: (|editor, _| {
+                    editor.event_sender.send(EditorEvent::SaveRequested(editor.active_view().unwrap().buffer));
 
                     Ok(())
                 })
