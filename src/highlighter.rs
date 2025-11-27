@@ -183,6 +183,8 @@ impl Highlighter {
     {
         let mut tokens = self.tokens.borrow_mut();
 
+        if tokens.is_empty() { return }
+
         for i in 0..inserted_lines {
             tokens.insert(start_row + i, vec![]);
 
