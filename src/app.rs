@@ -17,7 +17,7 @@ use crate::ui::ui_manager::UiManager;
 use crate::ui::status_bar::StatusBar;
 use crate::ui::command::Command;
 use crate::renderer::Renderer;
-use crate::input::{InputHandler};
+use crate::input::{InputHandler, InputEvent};
 use crate::plugins::config::Config;
 use crate::keymap::Keymap;
 use crate::log;
@@ -224,11 +224,7 @@ impl App {
         true
     }
 
-    fn handle_input_event(&mut self) {
-        let input = match self.input.poll() {
-            Ok(Some(ev)) => ev,
-            _ => return,
-        };
+    pub fn handle_input(&mut self, input: InputEvent) {
         let mode = match self.editor.active_view() {
             Some(view) => &view.mode,
             None => &EditorMode::Normal
@@ -239,6 +235,15 @@ impl App {
             None => return,
         };
         self.editor.handle_action(&action);
+    }
+
+    fn handle_input_event(&mut self) {
+        let input = match self.input.poll() {
+            Ok(Some(ev)) => ev,
+            _ => return,
+        };
+        
+        self.handle_input(input);
     }
 
     fn poll_plugin_events(&mut self) {

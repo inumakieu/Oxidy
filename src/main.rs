@@ -33,12 +33,13 @@ use wgpu_glyph::{GlyphBrushBuilder, Section, Text, ab_glyph};
 use winit::keyboard::{PhysicalKey, KeyCode};
 use winit::event::ElementState;
 use winit::event::Ime;
+use winit::keyboard::Key::Character;
 
 use crate::input::{InputHandler, CrosstermInput, WgpuInput};
 use crate::renderer::Renderer;
 use crate::renderer::wgpu_renderer::WgpuRenderer;
 use crate::renderer::crossterm::CrossTermRenderer;
-use crate::types::{Size, EditorAction, Direction};
+use crate::types::{Size, EditorAction, Direction, Key};
 
 use crate::editor::Editor;
 use crate::plugins::config::Config;
@@ -57,7 +58,7 @@ use std::time::{Instant, Duration};
 use std::collections::HashMap;
 
 struct KeyRepeatState {
-    last_movement: Option<HashMap<winit::keyboard::KeyCode, Instant>>,
+    last_movement: Option<HashMap<crate::types::Key, Instant>>,
 }
 
 fn gui_main(file_paths: Vec<String>) -> io::Result<()> {
@@ -134,7 +135,7 @@ fn gui_main(file_paths: Vec<String>) -> io::Result<()> {
                     event: winit::event::WindowEvent::KeyboardInput { event: input_data, .. },
                     ..
                 } => {
-                    if let Some(text) = &input_data.text {
+                    /*if let Some(text) = &input_data.text {
                         if !text.is_empty() {
                             for ch in text.chars().filter(|c| !c.is_control()) {
                                 app.editor.handle_action(&EditorAction::InsertChar(ch));
@@ -142,46 +143,53 @@ fn gui_main(file_paths: Vec<String>) -> io::Result<()> {
                                 return
                             }
                         }
-                    }
-                    let key = match input_data.physical_key {
-                        PhysicalKey::Code(k) => k,
-                        _ => return,
-                    };
+                    }*/
 
-                    // Initialize per-key tracking map if not already present
-                    if app.key_repeat.last_movement.is_none() {
-                        app.key_repeat.last_movement = Some(HashMap::new());
-                    }
-                    let last_movement = app.key_repeat.last_movement.as_mut().unwrap();
+                    let key = match map_winit_key(&input_data.logical_key) {
+                        Some(k) => k,
+                        None => return, // unmapped key
+                    };
+                    
+                    let now = Instant::now();
+                    let mut allow_move = true;
 
                     const REPEAT_DELAY: Duration = Duration::from_millis(300);
                     const REPEAT_RATE: Duration  = Duration::from_millis(40);
 
+                    // Check repeat map without holding a borrow across handle_input
+                    {
+                        let last_movement = app.key_repeat.last_movement.get_or_insert_with(HashMap::new);
+                        allow_move = match last_movement.get(&key) {
+                            Some(last) => now.duration_since(*last) >= REPEAT_RATE,
+                            None => true,
+                        };
+                    }
+
                     match input_data.state {
                         ElementState::Pressed => {
-                            let now = Instant::now();
-                            let allow_move = match last_movement.get(&key) {
-                                Some(last) => now.duration_since(*last) >= REPEAT_RATE,
-                                None => true, // first press
+                            let modifiers = crate::types::Modifiers {
+                                shift: false,
+                                ctrl: false,
+                                alt: false,
+                                super_key: false,
+                            };
+
+                            let input = crate::input::InputEvent::Key {
+                                key,
+                                modifiers
                             };
 
                             if allow_move {
-                                match key {
-                                    KeyCode::ArrowUp    => app.editor.handle_action(&EditorAction::MoveCursor(Direction::Up)),
-                                    KeyCode::ArrowDown  => app.editor.handle_action(&EditorAction::MoveCursor(Direction::Down)),
-                                    KeyCode::ArrowLeft  => app.editor.handle_action(&EditorAction::MoveCursor(Direction::Left)),
-                                    KeyCode::ArrowRight => app.editor.handle_action(&EditorAction::MoveCursor(Direction::Right)),
-                                    KeyCode::Backspace => app.editor.handle_action(&EditorAction::DeleteChar),
-                                    KeyCode::Enter => app.editor.handle_action(&EditorAction::InsertNewline),
-                                    _ => {}
-                                }
+                                app.handle_input(input);
 
+                                let last_movement = app.key_repeat.last_movement.get_or_insert_with(HashMap::new);
                                 last_movement.insert(key, now);
                                 window.request_redraw();
                             }
                         }
 
                         ElementState::Released => {
+                            let last_movement = app.key_repeat.last_movement.get_or_insert_with(HashMap::new);
                             last_movement.remove(&key);
                         }
                     }                
@@ -193,6 +201,34 @@ fn gui_main(file_paths: Vec<String>) -> io::Result<()> {
 
     Ok(())
 }
+
+fn map_winit_key(key: &winit::keyboard::Key) -> Option<Key> {
+    use winit::keyboard::{Key as WKey, NamedKey};
+
+    match key {
+        WKey::Named(named) => match named {
+            NamedKey::ArrowUp => Some(Key::Up),
+            NamedKey::ArrowDown => Some(Key::Down),
+            NamedKey::ArrowLeft => Some(Key::Left),
+            NamedKey::ArrowRight => Some(Key::Right),
+
+            NamedKey::Backspace => Some(Key::Backspace),
+            NamedKey::Enter => Some(Key::Enter),
+            NamedKey::Escape => Some(Key::Esc),
+            NamedKey::Tab => Some(Key::Tab),
+
+            _ => None,
+        },
+
+        WKey::Character(s) => {
+            // Defensive: ignore multi-char weirdness
+            s.chars().next().map(Key::Char)
+        }
+
+        _ => None,
+    }
+}
+
 
 fn tui_main(file_paths: Vec<String>) -> io::Result<()> {
     let term_size = terminal::size().expect("Size could not be determined.");
