@@ -32,6 +32,7 @@ use wgpu::CompositeAlphaMode;
 use wgpu_glyph::{GlyphBrushBuilder, Section, Text, ab_glyph};
 use winit::keyboard::{PhysicalKey, KeyCode};
 use winit::event::ElementState;
+use winit::event::Ime;
 
 use crate::input::{InputHandler, CrosstermInput, WgpuInput};
 use crate::renderer::Renderer;
@@ -72,6 +73,7 @@ fn gui_main(file_paths: Vec<String>) -> io::Result<()> {
             .build(&event_loop)
             .unwrap(),
     );
+    window.set_ime_allowed(true);
 
     let mut wgpu_renderer = WgpuRenderer::new(&window);
 
@@ -132,6 +134,15 @@ fn gui_main(file_paths: Vec<String>) -> io::Result<()> {
                     event: winit::event::WindowEvent::KeyboardInput { event: input_data, .. },
                     ..
                 } => {
+                    if let Some(text) = &input_data.text {
+                        if !text.is_empty() {
+                            for ch in text.chars().filter(|c| !c.is_control()) {
+                                app.editor.handle_action(&EditorAction::InsertChar(ch));
+                                window.request_redraw();
+                                return
+                            }
+                        }
+                    }
                     let key = match input_data.physical_key {
                         PhysicalKey::Code(k) => k,
                         _ => return,
@@ -160,6 +171,8 @@ fn gui_main(file_paths: Vec<String>) -> io::Result<()> {
                                     KeyCode::ArrowDown  => app.editor.handle_action(&EditorAction::MoveCursor(Direction::Down)),
                                     KeyCode::ArrowLeft  => app.editor.handle_action(&EditorAction::MoveCursor(Direction::Left)),
                                     KeyCode::ArrowRight => app.editor.handle_action(&EditorAction::MoveCursor(Direction::Right)),
+                                    KeyCode::Backspace => app.editor.handle_action(&EditorAction::DeleteChar),
+                                    KeyCode::Enter => app.editor.handle_action(&EditorAction::InsertNewline),
                                     _ => {}
                                 }
 
