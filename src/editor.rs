@@ -6,6 +6,8 @@ use std::fs::File;
 use std::time::Duration;
 use std::collections::HashMap;
 
+use unicode_segmentation::UnicodeSegmentation;
+
 use crate::buffer::{Buffer, BufferView};
 use crate::input::InputHandler;
 use crate::types::{BufferId, ViewId, EditorAction, Direction};
@@ -322,7 +324,7 @@ impl Editor {
     fn move_cursor_right(&mut self) {
         if let Some(view) = self.views.get_mut(&self.active_view) {
             if let Some(line) = self.buffers.get(&view.buffer).unwrap().line(view.cursor.row) {
-                if view.cursor.col < line.len() {
+                if view.cursor.col < line.graphemes(true).count() {
                     view.cursor.col += 1;
                 }
             }
