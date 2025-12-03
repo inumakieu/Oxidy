@@ -37,7 +37,7 @@ use winit::keyboard::Key::Character;
 
 use crate::input::{InputHandler, CrosstermInput, WgpuInput};
 use crate::renderer::Renderer;
-use crate::renderer::wgpu_renderer::WgpuRenderer;
+use crate::renderer::wgpu::renderer::WgpuRenderer;
 use crate::renderer::crossterm::CrossTermRenderer;
 use crate::types::{Size, EditorAction, Direction, Key};
 
@@ -70,6 +70,7 @@ fn gui_main(file_paths: Vec<String>) -> io::Result<()> {
         winit::window::WindowBuilder::new()
             .with_title("Oxidy")
             .with_resizable(true)
+            .with_transparent(true)
             .with_blur(true)
             .build(&event_loop)
             .unwrap(),
@@ -135,16 +136,6 @@ fn gui_main(file_paths: Vec<String>) -> io::Result<()> {
                     event: winit::event::WindowEvent::KeyboardInput { event: input_data, .. },
                     ..
                 } => {
-                    /*if let Some(text) = &input_data.text {
-                        if !text.is_empty() {
-                            for ch in text.chars().filter(|c| !c.is_control()) {
-                                app.editor.handle_action(&EditorAction::InsertChar(ch));
-                                window.request_redraw();
-                                return
-                            }
-                        }
-                    }*/
-
                     let key = match map_winit_key(&input_data.logical_key) {
                         Some(k) => k,
                         None => return, // unmapped key
@@ -216,6 +207,7 @@ fn map_winit_key(key: &winit::keyboard::Key) -> Option<Key> {
             NamedKey::Enter => Some(Key::Enter),
             NamedKey::Escape => Some(Key::Esc),
             NamedKey::Tab => Some(Key::Tab),
+            NamedKey::Space => Some(Key::Char(' ')),
 
             _ => None,
         },

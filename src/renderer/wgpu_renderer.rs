@@ -20,7 +20,7 @@ use crate::ui::ui_manager::UiManager;
 use crate::editor::Editor;
 use crate::renderer::Renderer;
 
-pub struct WgpuRenderer {
+pub struct WgpuRendererOld {
     pub surface: Surface<'static>,
     pub instance: Instance,
     pub device: Device,
@@ -55,7 +55,7 @@ fn fs_main() -> @location(0) vec4<f32> {
 }
 "#;
 
-impl WgpuRenderer {
+impl WgpuRendererOld {
     pub fn new(window: &Arc<Window>) -> Self {
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
         let surface = instance.create_surface(window.clone()).unwrap();
@@ -253,7 +253,7 @@ impl WgpuRenderer {
     }
 }
 
-impl Renderer for WgpuRenderer {
+impl Renderer for WgpuRendererOld {
     fn begin_frame(&mut self) {}
 
     fn draw_buffer(&mut self, editor: &Editor, ui: &UiManager, config: &Config) {

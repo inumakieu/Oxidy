@@ -1,5 +1,6 @@
 pub mod crossterm;
 pub mod wgpu_renderer;
+pub mod wgpu;
 
 use crate::buffer::{Buffer, BufferView};
 use crate::highlighter::Highlighter;
